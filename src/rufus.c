@@ -3667,7 +3667,7 @@ skip_args_processing:
 		WindowsVersion.Version = forced_windows_version;
 
 	// ...and nothing of value was lost
-	if (WindowsVersion.Version <= WINDOWS_7) {
+	if (WindowsVersion.Version < WINDOWS_XP) {
 		// Load the translation before we print the error
 		get_loc_data_file(loc_file, selected_locale);
 		right_to_left_mode = ((selected_locale->ctrl_id) & LOC_RIGHT_TO_LEFT);
