@@ -1,4 +1,4 @@
-Rufus: The Reliable USB Formatting Utility
+This is a fork of Rufus to allow it to at least run under Windows 7, download support will show but is non functional and didn't seem to work well in the first place. If new commits are trivial to get working, I'll keep trying to maintain this. If something huge comes and breaks everything, I'll likely have to archive the repo.
 ==========================================
 
 [![VS2022 Build Status](https://img.shields.io/github/actions/workflow/status/pbatard/rufus/vs2022.yml?branch=master&style=flat-square&label=VS2022%20Build)](https://github.com/pbatard/rufus/actions/workflows/vs2022.yml)
