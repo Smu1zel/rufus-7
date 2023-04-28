@@ -115,7 +115,7 @@ static const char* autorun_name = "autorun.inf";
 static const char* manjaro_marker = ".miso";
 static const char* pop_os_name = "pop-os";
 static const char* stupid_antivirus = "  NOTE: This is usually caused by a poorly designed security solution. "
-	"See https://goo.gl/QTobxX.\r\n  This file will be skipped for now, but you should really "
+	"See https://bit.ly/40qDtyF.\r\n  This file will be skipped for now, but you should really "
 	"look into using a *SMARTER* antivirus solution.";
 const char* old_c32_name[NB_OLD_C32] = OLD_C32_NAMES;
 static const int64_t old_c32_threshold[NB_OLD_C32] = OLD_C32_THRESHOLD;
@@ -322,7 +322,7 @@ static BOOL check_iso_props(const char* psz_dirname, int64_t file_length, const 
 // Apply various workarounds to Linux config files
 static void fix_config(const char* psz_fullpath, const char* psz_path, const char* psz_basename, EXTRACT_PROPS* props)
 {
-	BOOL modified = FALSE;
+	BOOL modified = FALSE, patched;
 	size_t nul_pos;
 	char *iso_label = NULL, *usb_label = NULL, *src, *dst;
 
@@ -338,6 +338,7 @@ static void fix_config(const char* psz_fullpath, const char* psz_path, const cha
 			if (replace_in_token_data(src, props->is_grub_cfg ? "linux" : "append",
 				"file=/cdrom/preseed", "persistent file=/cdrom/preseed", TRUE) != NULL) {
 				// Ubuntu & derivatives are assumed to use 'file=/cdrom/preseed/...'
+				// or 'layerfs-path=minimal.standard.live.squashfs' (see below)
 				// somewhere in their kernel options and use 'persistent' as keyword.
 				uprintf("  Added 'persistent' kernel option");
 				modified = TRUE;
@@ -345,6 +346,11 @@ static void fix_config(const char* psz_fullpath, const char* psz_path, const cha
 				if ((props->is_grub_cfg) && replace_in_token_data(src, "linux",
 					"maybe-ubiquity", "", TRUE))
 					uprintf("  Removed 'maybe-ubiquity' kernel option");
+			} else if (replace_in_token_data(src, "linux", "layerfs-path=minimal.standard.live.squashfs",
+				"persistent layerfs-path=minimal.standard.live.squashfs", TRUE) != NULL) {
+				// Ubuntu 23.04 uses GRUB only with the above and does not use "maybe-ubiquity"
+				uprintf("  Added 'persistent' kernel option");
+				modified = TRUE;
 			} else if (replace_in_token_data(src, props->is_grub_cfg ? "linux" : "append",
 				"boot=live", "boot=live persistence", TRUE) != NULL) {
 				// Debian & derivatives are assumed to use 'boot=live' in
@@ -375,11 +381,14 @@ static void fix_config(const char* psz_fullpath, const char* psz_path, const cha
 		iso_label = replace_char(img_report.label, ' ', "\\x20");
 		usb_label = replace_char(img_report.usb_label, ' ', "\\x20");
 		if ((iso_label != NULL) && (usb_label != NULL)) {
+			patched = FALSE;
 			for (int i = 0; i < ARRAYSIZE(cfg_token); i++) {
-				if (replace_in_token_data(src, cfg_token[i], iso_label, usb_label, TRUE) != NULL)
+				if (replace_in_token_data(src, cfg_token[i], iso_label, usb_label, TRUE) != NULL) {
 					modified = TRUE;
+					patched = TRUE;
+				}
 			}
-			if (modified)
+			if (patched)
 				uprintf("  Patched %s: '%s' ➔ '%s'\n", src, iso_label, usb_label);
 			// Since version 8.2, and https://github.com/rhinstaller/anaconda/commit/a7661019546ec1d8b0935f9cb0f151015f2e1d95,
 			// Red Hat derivatives have changed their CD-ROM detection policy which leads to the installation source
@@ -388,13 +397,15 @@ static void fix_config(const char* psz_fullpath, const char* psz_path, const cha
 			// netinst from regular is a pain. So, because I don't have all day to fix the mess that Red-Hat created when
 			// they introduced a kernel option to decide where the source packages should be picked from we're just going
 			// to *hope* that users didn't rename their ISOs and check whether it contains 'netinst' or not. Oh well...
-			modified = FALSE;
+			patched = FALSE;
 			if (img_report.rh8_derivative && (strstr(image_path, "netinst") == NULL)) {
 				for (int i = 0; i < ARRAYSIZE(cfg_token); i++) {
-					if (replace_in_token_data(src, cfg_token[i], "inst.stage2", "inst.repo", TRUE) != NULL)
+					if (replace_in_token_data(src, cfg_token[i], "inst.stage2", "inst.repo", TRUE) != NULL) {
 						modified = TRUE;
+						patched = TRUE;
+					}
 				}
-				if (modified)
+				if (patched)
 					uprintf("  Patched %s: '%s' ➔ '%s'\n", src, "inst.stage2", "inst.repo");
 			}
 		}
@@ -1454,7 +1465,7 @@ int iso9660_readfat(intptr_t pp, void *buf, size_t secsize, libfat_sector_t sec)
 	iso9660_readfat_private* p_private = (iso9660_readfat_private*)pp;
 
 	if (sizeof(p_private->buf) % secsize != 0) {
-		uprintf("iso9660_readfat: Sector size %d is not a divisor of %d", secsize, sizeof(p_private->buf));
+		uprintf("iso9660_readfat: Sector size %zu is not a divisor of %zu", secsize, sizeof(p_private->buf));
 		return 0;
 	}
 
