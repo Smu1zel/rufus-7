@@ -1,4 +1,4 @@
-Rufus: The Reliable USB Formatting Utility
+This is a fork of Rufus to allow it to at least run under Windows 7, download support will show but is non functional and didn't seem to work well in the first place. If new commits are trivial to get working, I'll keep trying to maintain this. If something huge comes and breaks everything, I'll likely have to archive the repo.
 ==========================================
 
 [![VS2022 Build Status](https://img.shields.io/github/actions/workflow/status/pbatard/rufus/vs2022.yml?branch=master&style=flat-square&label=VS2022%20Build)](https://github.com/pbatard/rufus/actions/workflows/vs2022.yml)
@@ -17,7 +17,7 @@ Features
 --------
 
 * Format USB, flash card and virtual drives to FAT/FAT32/NTFS/UDF/exFAT/ReFS/ext2/ext3
-* Create DOS bootable USB drives using [FreeDOS](https://www.freedos.org) or MS-DOS
+* Create DOS bootable USB drives using [FreeDOS](https://www.freedos.org)
 * Create BIOS or UEFI bootable drives, including [UEFI bootable NTFS](https://github.com/pbatard/uefi-ntfs)
 * Create bootable drives from bootable ISOs (Windows, Linux, etc.)
 * Create bootable drives from bootable disk images, including compressed ones
@@ -28,7 +28,7 @@ Features
 * Compute MD5, SHA-1, SHA-256 and SHA-512 checksums of the selected image
 * Improve Windows installation experience by automatically setting up OOBE parameters (local account, privacy options, etc.)
 * Perform bad blocks checks, including detection of "fake" flash drives
-* Download official Microsoft Windows 8, Windows 10 or Windows 11 retail ISOs
+* Download official Microsoft Windows 7, Windows 8, Windows 10 or Windows 11 retail ISOs
 * Download [UEFI Shell](https://github.com/pbatard/UEFI-Shell) ISOs
 * Modern and familiar UI, with [38 languages natively supported](https://github.com/pbatard/rufus/wiki/FAQ#What_languages_are_natively_supported_by_Rufus)
 * Small footprint. No installation required.

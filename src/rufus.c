@@ -3277,6 +3277,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	char *tmp, *locale_name = NULL, **argv = NULL;
 	wchar_t **wenv, **wargv;
 	PF_TYPE_DECL(CDECL, int, __wgetmainargs, (int*, wchar_t***, wchar_t***, int, int*));
+	PF_TYPE_DECL(WINAPI, BOOL, SetDefaultDllDirectories, (DWORD));
 	HANDLE mutex = NULL, hogmutex = NULL, hFile = NULL;
 	HWND hDlg = NULL;
 	HDC hDC;
@@ -3305,7 +3306,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	// 'somelib.dll;%(DelayLoadDLLs)' must be added to the 'Delay Loaded Dlls' option of
 	// the linker properties in Visual Studio (which means this won't work with MinGW).
 	// For all other DLLs, use SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32).
-	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+	pfSetDefaultDllDirectories = (SetDefaultDllDirectories_t)
+		GetProcAddress(LoadLibraryW(L"kernel32.dll"), "SetDefaultDllDirectories");
+	if (pfSetDefaultDllDirectories != NULL)
+		pfSetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
 
 	uprintf("*** " APPLICATION_NAME " init ***\n");
 	its_a_me_mario = GetUserNameA((char*)(uintptr_t)&u, &size) && (u == 7104878);
@@ -3618,24 +3622,6 @@ skip_args_processing:
 
 	// Set the Windows version
 	GetWindowsVersion(&WindowsVersion);
-	// Force a version if specified as parameter, but without allowing folks running
-	// a version of Windows we no longer support to use the option as a bypass!
-	if (WindowsVersion.Version > WINDOWS_7 && forced_windows_version != 0)
-		WindowsVersion.Version = forced_windows_version;
-
-	// ...and nothing of value was lost
-	if (WindowsVersion.Version <= WINDOWS_7) {
-		// Load the translation before we print the error
-		get_loc_data_file(loc_file, selected_locale);
-		right_to_left_mode = ((selected_locale->ctrl_id) & LOC_RIGHT_TO_LEFT);
-		// Set MB_SYSTEMMODAL to prevent Far Manager from stealing focus...
-		MessageBoxExU(NULL,
-			lmprintf(MSG_294,
-				(WindowsVersion.Version == WINDOWS_7) ? 3 : 2,
-				(WindowsVersion.Version == WINDOWS_7) ? 22 : 18),
-			lmprintf(MSG_293), MB_ICONSTOP | MB_IS_RTL | MB_SYSTEMMODAL, selected_langid);
-		goto out;
-	}
 
 	// This is needed as there appears to be a *FLAW* in Windows allowing the app to run unelevated with some
 	// weirdly configured user accounts, even as we explicitly set 'requireAdministrator' in the manifest...
