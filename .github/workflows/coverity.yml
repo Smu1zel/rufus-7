@@ -15,11 +15,11 @@ on:
       - '**.xml'
 
 env:
-  SOLUTION_FILE_PATH: ./rufus.sln
+  SOLUTION_FILE_PATH: ./.sln
   EMAIL: pete@akeo.ie
   BUILD_CONFIGURATION: Release
   TARGET_PLATFORM: x64
-  COVERITY_PROJECT_NAME: pbatard%2Frufus
+  COVERITY_PROJECT_NAME: Smu1zel%2Frufus-7
 
 jobs:
   Coverity-Build:
