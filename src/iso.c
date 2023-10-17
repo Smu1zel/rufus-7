@@ -122,7 +122,7 @@ static const char* stupid_antivirus = "  NOTE: This is usually caused by a poorl
 const char* old_c32_name[NB_OLD_C32] = OLD_C32_NAMES;
 static const int64_t old_c32_threshold[NB_OLD_C32] = OLD_C32_THRESHOLD;
 static uint8_t joliet_level = 0;
-static uint64_t total_blocks, nb_blocks;
+static uint64_t total_blocks, extra_blocks, nb_blocks;
 static BOOL scan_only = FALSE;
 static StrArray config_path, isolinux_path, modified_path;
 static char symlinked_syslinux[MAX_PATH];
@@ -311,20 +311,20 @@ static BOOL check_iso_props(const char* psz_dirname, int64_t file_length, const 
 		}
 
 		// Check for PE (XP) specific files in "/i386", "/amd64" or "/minint"
-		for (i=0; i<ARRAYSIZE(pe_dirname); i++)
+		for (i = 0; i < ARRAYSIZE(pe_dirname); i++)
 			if (safe_stricmp(psz_dirname, pe_dirname[i]) == 0)
 				for (j=0; j<ARRAYSIZE(pe_file); j++)
 					if (safe_stricmp(psz_basename, pe_file[j]) == 0)
 						img_report.winpe |= (1<<j)<<(ARRAYSIZE(pe_dirname)*i);
 
-		for (i=0; i<ARRAYSIZE(isolinux_bin); i++) {
+		for (i = 0; i < ARRAYSIZE(isolinux_bin); i++) {
 			if (safe_stricmp(psz_basename, isolinux_bin[i]) == 0) {
 				// Maintain a list of all the isolinux.bin files found
 				StrArrayAdd(&isolinux_path, psz_fullpath, TRUE);
 			}
 		}
 
-		for (i=0; i<NB_OLD_C32; i++) {
+		for (i = 0; i < NB_OLD_C32; i++) {
 			if (props->is_old_c32[i])
 				img_report.has_old_c32[i] = TRUE;
 		}
@@ -462,6 +462,62 @@ static void fix_config(const char* psz_fullpath, const char* psz_path, const cha
 		StrArrayAdd(&modified_path, psz_fullpath, TRUE);
 
 	free(src);
+}
+
+// This updates the MD5SUMS/md5sum.txt file that some distros (Ubuntu, Mint...)
+// use to validate the media. Because we may alter some of the validated files
+// to add persistence and whatnot, we need to alter the MD5 list as a result.
+// The format of the file is expected to always be "<MD5SUM> <FILE_PATH>" on
+// individual lines.
+static void update_md5sum(void)
+{
+	BOOL display_header = TRUE;
+	intptr_t pos;
+	uint32_t i, j, size, md5_size;
+	uint8_t* buf = NULL, sum[16];
+	char md5_path[64], * md5_data = NULL, * str_pos;
+
+	if (!img_report.has_md5sum)
+		goto out;
+
+	assert(img_report.has_md5sum <= ARRAYSIZE(md5sum_name));
+	if (img_report.has_md5sum > ARRAYSIZE(md5sum_name))
+		goto out;
+
+	static_sprintf(md5_path, "%s\\%s", psz_extract_dir, md5sum_name[img_report.has_md5sum - 1]);
+	md5_size = read_file(md5_path, (uint8_t**)&md5_data);
+	if (md5_size == 0)
+		goto out;
+
+	for (i = 0; i < modified_path.Index; i++) {
+		str_pos = strstr(md5_data, &modified_path.String[i][2]);
+		if (str_pos == NULL)
+			// File is not listed in md5 sums
+			continue;
+		if (display_header) {
+			uprintf("Updating %s:", md5_path);
+			display_header = FALSE;
+		}
+		uprintf("● %s", &modified_path.String[i][2]);
+		pos = str_pos - md5_data;
+		size = read_file(modified_path.String[i], &buf);
+		if (size == 0)
+			continue;
+		HashBuffer(HASH_MD5, buf, size, sum);
+		free(buf);
+		while ((pos > 0) && (md5_data[pos - 1] != '\n'))
+			pos--;
+		for (j = 0; j < 16; j++) {
+			md5_data[pos + 2 * j] = ((sum[j] >> 4) < 10) ? ('0' + (sum[j] >> 4)) : ('a' - 0xa + (sum[j] >> 4));
+			md5_data[pos + 2 * j + 1] = ((sum[j] & 15) < 10) ? ('0' + (sum[j] & 15)) : ('a' - 0xa + (sum[j] & 15));
+		}
+	}
+
+	write_file(md5_path, md5_data, md5_size);
+	free(md5_data);
+
+out:
+	StrArrayDestroy(&modified_path);
 }
 
 static void print_extracted_file(char* psz_fullpath, uint64_t file_length)
@@ -644,69 +700,13 @@ out:
 	return 1;
 }
 
-// This updates the MD5SUMS/md5sum.txt file that some distros (Ubuntu, Mint...)
-// use to validate the media. Because we may alter some of the validated files
-// to add persistence and whatnot, we need to alter the MD5 list as a result.
-// The format of the file is expected to always be "<MD5SUM> <FILE_PATH>" on
-// individual lines.
-static void update_md5sum(void)
-{
-	BOOL display_header = TRUE;
-	intptr_t pos;
-	uint32_t i, j, size, md5_size;
-	uint8_t *buf = NULL, sum[16];
-	char md5_path[64], *md5_data = NULL, *str_pos;
-
-	if (!img_report.has_md5sum)
-		goto out;
-
-	assert(img_report.has_md5sum <= ARRAYSIZE(md5sum_name));
-	if (img_report.has_md5sum > ARRAYSIZE(md5sum_name))
-		goto out;
-
-	static_sprintf(md5_path, "%s\\%s", psz_extract_dir, md5sum_name[img_report.has_md5sum - 1]);
-	md5_size = read_file(md5_path, (uint8_t**)&md5_data);
-	if (md5_size == 0)
-		goto out;
-
-	for (i = 0; i < modified_path.Index; i++) {
-		str_pos = strstr(md5_data, &modified_path.String[i][2]);
-		if (str_pos == NULL)
-			// File is not listed in md5 sums
-			continue;
-		if (display_header) {
-			uprintf("Updating %s:", md5_path);
-			display_header = FALSE;
-		}
-		uprintf("● %s", &modified_path.String[i][2]);
-		pos = str_pos - md5_data;
-		size = read_file(modified_path.String[i], &buf);
-		if (size == 0)
-			continue;
-		HashBuffer(HASH_MD5, buf, size, sum);
-		free(buf);
-		while ((pos > 0) && (md5_data[pos - 1] != '\n'))
-			pos--;
-		for (j = 0; j < 16; j++) {
-			md5_data[pos + 2 * j] =     ((sum[j] >> 4) < 10) ? ('0' + (sum[j] >> 4)) : ('a' - 0xa + (sum[j] >> 4));
-			md5_data[pos + 2 * j + 1] = ((sum[j] & 15) < 10) ? ('0' + (sum[j] & 15)) : ('a' - 0xa + (sum[j] & 15));
-		}
-	}
-
-	write_file(md5_path, md5_data, md5_size);
-	free(md5_data);
-
-out:
-	StrArrayDestroy(&modified_path);
-}
-
 // Returns 0 on success, >0 on error, <0 to ignore current dir
 static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 {
 	HANDLE file_handle = NULL;
 	DWORD buf_size, wr_size, err;
 	EXTRACT_PROPS props;
-	BOOL is_symlink, is_identical, free_p_statbuf = FALSE;
+	BOOL is_symlink, is_identical, create_file, free_p_statbuf = FALSE;
 	int length, r = 1;
 	char psz_fullpath[MAX_PATH], *psz_basename = NULL, *psz_sanpath = NULL;
 	char tmp[128], target_path[256];
@@ -793,13 +793,19 @@ static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 		} else {
 			file_length = p_statbuf->total_size;
 			if (check_iso_props(psz_path, file_length, psz_basename, psz_fullpath, &props)) {
-				// Add symlink duplicated files to total_size at scantime
-				if (is_symlink && (file_length == 0) && (strcmp(psz_path, "/firmware") == 0)) {
-					static_sprintf(target_path, "%s/%s", psz_path, p_statbuf->rr.psz_symlink);
-					iso9660_stat_t *p_statbuf2 = iso9660_ifs_stat_translate(p_iso, target_path);
-					if (p_statbuf2 != NULL) {
-						total_blocks += (p_statbuf2->total_size + ISO_BLOCKSIZE - 1) / ISO_BLOCKSIZE;
-						iso9660_stat_free(p_statbuf2);
+				if (is_symlink && (file_length == 0)) {
+					// Add symlink duplicated files to total_size at scantime
+					if ((strcmp(psz_path, "/firmware") == 0)) {
+						static_sprintf(target_path, "%s/%s", psz_path, p_statbuf->rr.psz_symlink);
+						iso9660_stat_t* p_statbuf2 = iso9660_ifs_stat_translate(p_iso, target_path);
+						if (p_statbuf2 != NULL) {
+							extra_blocks += (p_statbuf2->total_size + ISO_BLOCKSIZE - 1) / ISO_BLOCKSIZE;
+							iso9660_stat_free(p_statbuf2);
+						}
+					} else if ((strcmp(p_statbuf->filename, "live") == 0) &&
+						(strcmp(p_statbuf->rr.psz_symlink, "casper") == 0)) {
+						// Mint LMDE requires working symbolic links and therefore requires the use of NTFS
+						img_report.needs_ntfs = TRUE;
 					}
 				}
 				continue;
@@ -821,8 +827,26 @@ static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 			psz_sanpath = sanitize_filename(psz_fullpath, &is_identical);
 			if (!is_identical)
 				uprintf("  File name sanitized to '%s'", psz_sanpath);
+			create_file = TRUE;
 			if (is_symlink) {
-				if (file_length == 0) {
+				if (fs_type == FS_NTFS) {
+					// Replicate symlinks if NTFS is being used
+					static_sprintf(target_path, "%s/%s", psz_path, p_statbuf->rr.psz_symlink);
+					iso9660_stat_t* p_statbuf2 = iso9660_ifs_stat_translate(p_iso, target_path);
+					if (p_statbuf2 != NULL) {
+						to_windows_path(psz_fullpath);
+						to_windows_path(p_statbuf->rr.psz_symlink);
+						uprintf("Symlinking: %s%s ➔ %s", psz_fullpath,
+							(p_statbuf2->type == _STAT_DIR) ? "\\" : "", p_statbuf->rr.psz_symlink);
+						if (!CreateSymbolicLinkU(psz_fullpath, p_statbuf->rr.psz_symlink,
+							(p_statbuf2->type == _STAT_DIR) ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0))
+							uprintf("  Could not create symlink: %s", WindowsErrorString());
+						to_unix_path(p_statbuf->rr.psz_symlink);
+						to_unix_path(psz_fullpath);
+						iso9660_stat_free(p_statbuf2);
+						create_file = FALSE;
+					}
+				} else if (file_length == 0) {
 					if ((safe_stricmp(p_statbuf->filename, "syslinux") == 0) &&
 						// Special handling for ISOs that have a syslinux → isolinux symbolic link (e.g. Knoppix)
 						(safe_stricmp(p_statbuf->rr.psz_symlink, "isolinux") == 0)) {
@@ -846,45 +870,58 @@ static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 							goto out;
 						}
 					} else {
-						// TODO: Ideally, we'd want to create a text file that contains the target link
-						print_extracted_file(psz_fullpath, file_length);
+						print_extracted_file(psz_fullpath, safe_strlen(p_statbuf->rr.psz_symlink));
 						uprintf("  Ignoring Rock Ridge symbolic link to '%s'", p_statbuf->rr.psz_symlink);
 					}
+				} else {
+					uuprintf("Unexpected symlink length: %d", file_length);
+					create_file = FALSE;
 				}
 			}
-			file_handle = CreatePreallocatedFile(psz_sanpath, GENERIC_READ | GENERIC_WRITE,
-				FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, file_length);
-			if (file_handle == INVALID_HANDLE_VALUE) {
-				err = GetLastError();
-				uprintf("  Unable to create file: %s", WindowsErrorString());
-				if (((err == ERROR_ACCESS_DENIED) || (err == ERROR_INVALID_HANDLE)) &&
-					(safe_strcmp(&psz_sanpath[3], autorun_name) == 0))
-					uprintf(stupid_antivirus);
-				else
-					goto out;
-			} else for (i = 0; file_length > 0; i++) {
-				if (FormatStatus) goto out;
-				memset(buf, 0, ISO_BLOCKSIZE);
-				lsn = p_statbuf->lsn + (lsn_t)i;
-				if (iso9660_iso_seek_read(p_iso, buf, lsn, 1) != ISO_BLOCKSIZE) {
-					uprintf("  Error reading ISO9660 file %s at LSN %lu",
-						psz_iso_name, (long unsigned int)lsn);
-					goto out;
+			if (create_file) {
+				file_handle = CreatePreallocatedFile(psz_sanpath, GENERIC_READ | GENERIC_WRITE,
+					FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, file_length);
+				if (file_handle == INVALID_HANDLE_VALUE) {
+					err = GetLastError();
+					uprintf("  Unable to create file: %s", WindowsErrorString());
+					if (((err == ERROR_ACCESS_DENIED) || (err == ERROR_INVALID_HANDLE)) &&
+						(safe_strcmp(&psz_sanpath[3], autorun_name) == 0))
+						uprintf(stupid_antivirus);
+					else
+						goto out;
+				} else if (is_symlink) {
+					// Create a text file that contains the target link
+					ISO_BLOCKING(r = WriteFileWithRetry(file_handle, p_statbuf->rr.psz_symlink,
+						(DWORD)safe_strlen(p_statbuf->rr.psz_symlink), &wr_size, WRITE_RETRIES));
+					if (!r) {
+						uprintf("  Error writing file: %s", WindowsErrorString());
+						goto out;
+					}
+				} else for (i = 0; file_length > 0; i++) {
+					if (FormatStatus) goto out;
+					memset(buf, 0, ISO_BLOCKSIZE);
+					lsn = p_statbuf->lsn + (lsn_t)i;
+					if (iso9660_iso_seek_read(p_iso, buf, lsn, 1) != ISO_BLOCKSIZE) {
+						uprintf("  Error reading ISO9660 file %s at LSN %lu",
+							psz_iso_name, (long unsigned int)lsn);
+						goto out;
+					}
+					buf_size = (DWORD)MIN(file_length, ISO_BLOCKSIZE);
+					ISO_BLOCKING(r = WriteFileWithRetry(file_handle, buf, buf_size, &wr_size, WRITE_RETRIES));
+					if (!r) {
+						uprintf("  Error writing file: %s", WindowsErrorString());
+						goto out;
+					}
+					file_length -= ISO_BLOCKSIZE;
+					if (nb_blocks++ % PROGRESS_THRESHOLD == 0)
+						UpdateProgressWithInfo(OP_FILE_COPY, MSG_231, nb_blocks, total_blocks +
+							((fs_type != FS_NTFS) ? extra_blocks : 0));
 				}
-				buf_size = (DWORD)MIN(file_length, ISO_BLOCKSIZE);
-				ISO_BLOCKING(r = WriteFileWithRetry(file_handle, buf, buf_size, &wr_size, WRITE_RETRIES));
-				if (!r) {
-					uprintf("  Error writing file: %s", WindowsErrorString());
-					goto out;
+				if (preserve_timestamps) {
+					LPFILETIME ft = to_filetime(mktime(&p_statbuf->tm));
+					if (!SetFileTime(file_handle, ft, ft, ft))
+						uprintf("  Could not set timestamp: %s", WindowsErrorString());
 				}
-				file_length -= ISO_BLOCKSIZE;
-				if (nb_blocks++ % PROGRESS_THRESHOLD == 0)
-					UpdateProgressWithInfo(OP_FILE_COPY, MSG_231, nb_blocks, total_blocks);
-			}
-			if (preserve_timestamps) {
-				LPFILETIME ft = to_filetime(mktime(&p_statbuf->tm));
-				if (!SetFileTime(file_handle, ft, ft, ft))
-					uprintf("  Could not set timestamp: %s", WindowsErrorString());
 			}
 			if (free_p_statbuf)
 				iso9660_stat_free(p_statbuf);
@@ -1014,6 +1051,7 @@ BOOL ExtractISO(const char* src_iso, const char* dest_dir, BOOL scan)
 		uprintf("ISO analysis:");
 		SendMessage(hMainDialog, UM_PROGRESS_INIT, PBS_MARQUEE, 0);
 		total_blocks = 0;
+		extra_blocks = 0;
 		has_ldlinux_c32 = FALSE;
 		// String array of all isolinux/syslinux locations
 		StrArrayCreate(&config_path, 8);
@@ -1096,7 +1134,7 @@ out:
 		if ((iso9660_ifs_read_pvd(p_iso, &pvd)) && (_stat64U(src_iso, &stat) == 0))
 			img_report.mismatch_size = (int64_t)(iso9660_get_pvd_space_size(&pvd)) * ISO_BLOCKSIZE - stat.st_size;
 		// Remove trailing spaces from the label
-		for (k=(int)safe_strlen(img_report.label)-1; ((k>0)&&(isspaceU(img_report.label[k]))); k--)
+		for (k = (int)safe_strlen(img_report.label) - 1; ((k > 0) && (isspaceU(img_report.label[k]))); k--)
 			img_report.label[k] = 0;
 		// We use the fact that UDF_BLOCKSIZE and ISO_BLOCKSIZE are the same here
 		img_report.projected_size = total_blocks * ISO_BLOCKSIZE;
@@ -1106,9 +1144,9 @@ out:
 		if (!IsStrArrayEmpty(config_path)) {
 			// Set the img_report.cfg_path string to maximum length, so that we don't have to
 			// do a special case for StrArray entry 0.
-			memset(img_report.cfg_path, '_', sizeof(img_report.cfg_path)-1);
-			img_report.cfg_path[sizeof(img_report.cfg_path)-1] = 0;
-			for (i=0; i<config_path.Index; i++) {
+			memset(img_report.cfg_path, '_', sizeof(img_report.cfg_path) - 1);
+			img_report.cfg_path[sizeof(img_report.cfg_path) - 1] = 0;
+			for (i = 0; i < config_path.Index; i++) {
 				// OpenSuse based Live image have a /syslinux.cfg that doesn't work, so we enforce
 				// the use of the one in '/boot/[i386|x86_64]/loader/isolinux.cfg' if present.
 				// Note that, because the openSuse live script are not designed to handle anything but
@@ -1130,7 +1168,7 @@ out:
 			}
 			uprintf("  Will use '%s' for Syslinux", img_report.cfg_path);
 			// Extract all of the isolinux.bin files we found to identify their versions
-			for (i=0; i<isolinux_path.Index; i++) {
+			for (i = 0; i < isolinux_path.Index; i++) {
 				char isolinux_tmp[MAX_PATH];
 				static_sprintf(isolinux_tmp, "%sisolinux.tmp", temp_dir);
 				size = (size_t)ExtractISOFile(src_iso, isolinux_path.String[i], isolinux_tmp, FILE_ATTRIBUTE_NORMAL);
@@ -1157,7 +1195,7 @@ out:
 							img_report.sl_version_ext, isolinux_path.String[i], SL_MAJOR(sl_version), SL_MINOR(sl_version), ext);
 						// Workaround for Antergos and other ISOs, that have multiple Syslinux versions.
 						// Where possible, prefer to the one that resides in the same directory as the config file.
-						for (j=safe_strlen(img_report.cfg_path); (j>0) && (img_report.cfg_path[j]!='/'); j--);
+						for (j=safe_strlen(img_report.cfg_path); (j > 0) && (img_report.cfg_path[j] != '/'); j--);
 						if (safe_strnicmp(img_report.cfg_path, isolinux_path.String[i], j) == 0) {
 							static_strcpy(img_report.sl_version_ext, ext);
 							img_report.sl_version = sl_version;
@@ -1197,7 +1235,7 @@ out:
 			ExtractISOFile(src_iso, path, tmp_sif, FILE_ATTRIBUTE_NORMAL);
 			tmp = get_token_data_file("OsLoadOptions", tmp_sif);
 			if (tmp != NULL) {
-				for (i=0; i<strlen(tmp); i++)
+				for (i = 0; i < strlen(tmp); i++)
 					tmp[i] = (char)tolower(tmp[i]);
 				uprintf("  Checking txtsetup.sif:\n  OsLoadOptions = %s", tmp);
 				img_report.uses_minint = (strstr(tmp, "/minint") != NULL);
@@ -1307,6 +1345,19 @@ out:
 		} else if (HAS_BOOTMGR(img_report) && enable_ntfs_compression) {
 			// bootmgr might need to be uncompressed: https://github.com/pbatard/rufus/issues/1381
 			RunCommand("compact /u bootmgr* efi/boot/*.efi", dest_dir, TRUE);
+		}
+		// Exception for Slax Syslinux UEFI bootloaders...
+		// ...that don't appear to work anyway as of slax-64bit-slackware-15.0.3.iso
+		static_sprintf(path, "%s\\slax\\boot\\EFI", dest_dir);
+		if (PathFileExistsA(path)) {
+			char dst_path[16];
+			static_sprintf(dst_path, "%s\\EFI", dest_dir);
+			if (!PathFileExistsA(dst_path)) {
+				if (MoveFileA(path, dst_path))
+					uprintf("Moved: %s → %s", path, dst_path);
+				else
+					uprintf("Could not move %s → %s", path, dst_path, WindowsErrorString());
+			}
 		}
 		update_md5sum();
 		if (archive_path != NULL) {

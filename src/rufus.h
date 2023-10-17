@@ -87,8 +87,8 @@
 #define STATUS_MSG_TIMEOUT          3500		// How long should cheat mode messages appear for on the status bar
 #define WRITE_RETRIES               4
 #define WRITE_TIMEOUT               5000		// How long we should wait between write retries (in ms)
-#define SEARCH_PROCESS_TIMEOUT      10000		// How long we should search for conflicting processes before giving up (in ms)
-#define NET_SESSION_TIMEOUT         3500		// How long we should wait to connect, send or receive internet data
+#define SEARCH_PROCESS_TIMEOUT      5000		// How long we should wait to get the conflicting process data (in ms)
+#define NET_SESSION_TIMEOUT         3500		// How long we should wait to connect, send or receive internet data (in ms)
 #define FS_DEFAULT                  FS_FAT32
 #define SINGLE_CLUSTERSIZE_DEFAULT  0x00000100
 #define BADLOCKS_PATTERN_TYPES      5
@@ -412,11 +412,12 @@ typedef struct {
 	BOOLEAN has_old_c32[NB_OLD_C32];
 	BOOLEAN has_old_vesamenu;
 	BOOLEAN has_efi_syslinux;
-	BOOLEAN needs_syslinux_overwrite;
 	BOOLEAN has_grub4dos;
 	uint8_t has_grub2;
 	BOOLEAN has_compatresources_dll;
 	BOOLEAN has_kolibrios;
+	BOOLEAN needs_syslinux_overwrite;
+	BOOLEAN needs_ntfs;
 	BOOLEAN uses_casper;
 	BOOLEAN uses_minint;
 	uint8_t compression_type;
@@ -729,8 +730,10 @@ extern char* ToLocaleName(DWORD lang_id);
 extern void SetAlertPromptMessages(void);
 extern BOOL SetAlertPromptHook(void);
 extern void ClrAlertPromptHook(void);
-extern DWORD CheckDriveAccess(DWORD dwTimeOut, BOOL bPrompt);
-extern BYTE SearchProcess(char* HandleName, DWORD dwTimeout, BOOL bPartialMatch, BOOL bIgnoreSelf, BOOL bQuiet);
+extern BOOL StartProcessSearch(void);
+extern void StopProcessSearch(void);
+extern BOOL SetProcessSearch(DWORD DeviceNum);
+extern BYTE GetProcessSearch(uint32_t timeout, uint8_t access_mask, BOOL bIgnoreStaleProcesses);
 extern BOOL EnablePrivileges(void);
 extern void FlashTaskbar(HANDLE handle);
 extern DWORD WaitForSingleObjectWithMessages(HANDLE hHandle, DWORD dwMilliseconds);
@@ -829,7 +832,7 @@ out:
 	if (pf##proc == NULL) {uprintf("Unable to locate %s() in '%s.dll': %s",  \
 	#proc, #name, WindowsErrorString()); goto out;} } while(0)
 #define PF_INIT_OR_SET_STATUS(proc, name)	do {PF_INIT(proc, name);         \
-	if ((pf##proc == NULL) && (NT_SUCCESS(status))) status = STATUS_NOT_IMPLEMENTED; } while(0)
+	if ((pf##proc == NULL) && (NT_SUCCESS(status))) status = STATUS_PROCEDURE_NOT_FOUND; } while(0)
 #if defined(_MSC_VER)
 #define TRY_AND_HANDLE(exception, TRY_CODE, EXCEPTION_CODE) __try TRY_CODE   \
 	__except (GetExceptionCode() == exception ? EXCEPTION_EXECUTE_HANDLER :  \
