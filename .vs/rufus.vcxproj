@@ -258,6 +258,7 @@
       <UndefinePreprocessorDefinitions>NDEBUG</UndefinePreprocessorDefinitions>
       <AdditionalOptions>/utf-8 $(ExternalCompilerOptions) %(AdditionalOptions)</AdditionalOptions>
       <StringPooling>true</StringPooling>
+      <EnableEnhancedInstructionSet>StreamingSIMDExtensions</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <AdditionalDependencies>advapi32.lib;comctl32.lib;crypt32.lib;gdi32.lib;ole32.lib;dwmapi.lib;setupapi.lib;shell32.lib;shlwapi.lib;version.lib;wintrust.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -361,6 +362,7 @@
       <UndefinePreprocessorDefinitions>NDEBUG</UndefinePreprocessorDefinitions>
       <AdditionalOptions>/utf-8 $(ExternalCompilerOptions) %(AdditionalOptions)</AdditionalOptions>
       <StringPooling>true</StringPooling>
+      <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <AdditionalDependencies>advapi32.lib;comctl32.lib;crypt32.lib;gdi32.lib;ole32.lib;dwmapi.lib;setupapi.lib;shell32.lib;shlwapi.lib;version.lib;wintrust.lib;%(AdditionalDependencies)</AdditionalDependencies>
