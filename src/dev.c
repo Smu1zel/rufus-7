@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * Device detection and enumeration
- * Copyright © 2014-2023 Pete Batard <pete@akeo.ie>
+ * Copyright © 2014-2024 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -465,7 +465,7 @@ BOOL GetDevices(DWORD devnum)
 	// Oh, and we also have card devices (e.g. 'SCSI\DiskO2Micro_SD_...') under the SCSI enumerator...
 	const char* scsi_disk_prefix = "SCSI\\Disk";
 	const char* scsi_card_name[] = {
-		"_SD_", "_SDHC_", "_MMC_", "_MS_", "_MSPro_", "_xDPicture_", "_O2Media_"
+		"_SD_", "_SDHC_", "_SDXC_", "_MMC_", "_MS_", "_MSPro_", "_xDPicture_", "_O2Media_"
 	};
 	const char* usb_speed_name[USB_SPEED_MAX] = { "USB", "USB 1.0", "USB 1.1", "USB 2.0", "USB 3.0", "USB 3.1" };
 	const char* windows_sandbox_vhd_label = "PortableBaseLayer";
@@ -931,6 +931,10 @@ BOOL GetDevices(DWORD devnum)
 				} else if ((!enable_HDDs) && (props.is_CARD) && (drive_size > MAX_DEFAULT_LIST_CARD_SIZE * GB)) {
 					uprintf("Device eliminated because it was detected as a card larger than %d GB", MAX_DEFAULT_LIST_CARD_SIZE);
 					uprintf("To use such a card, check 'List USB Hard Drives' under 'advanced drive properties'");
+					safe_free(devint_detail_data);
+					break;
+				} else if (props.is_VHD && IsMsDevDrive(drive_index)) {
+					uprintf("Device eliminated because it was detected as a Microsoft Dev Drive");
 					safe_free(devint_detail_data);
 					break;
 				}
