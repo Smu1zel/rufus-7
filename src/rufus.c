@@ -1,6 +1,6 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
- * Copyright © 2011-2023 Pete Batard <pete@akeo.ie>
+ * Copyright © 2011-2024 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -1261,7 +1261,8 @@ DWORD WINAPI ImageScanThread(LPVOID param)
 	const char* redhat8_derivative[] = {
 		"^AlmaLinux-[8-9].*",		// AlmaLinux 8.x and 9.x
 		"^Fedora.*-3[3-9].*",		// Fedora 33-39
-		"^CentOS.*-[8-9].*",		// CentOS and CentOS Stream 8.and 9.x
+		"^CentOS.*-[8-9].*",		// CentOS and CentOS Stream 8.x and 9.x
+		"^Circle.*-[8-9].*",		// Circle Linux 8.x.and 9.x
 		"^OL-[8-9].*",				// Oracle Linux 8.x and 9.x
 		"^RHEL-[8-9].*",			// Red Hat 8.x and 9.x
 		"^Rocky-[8-9].*",			// Rocky Linux 8.x and 9.x
@@ -1636,7 +1637,7 @@ static DWORD WINAPI BootCheckThread(LPVOID param)
 		}
 
 		// Check UEFI bootloaders for revocation
-		if (target_type == TT_UEFI) {
+		if (IS_EFI_BOOTABLE(img_report)) {
 			// coverity[swapped_arguments]
 			if (GetTempFileNameU(temp_dir, APPLICATION_NAME, 0, tmp) != 0) {
 				// ExtractISOFile() is case sensitive, so we must use 
@@ -1731,7 +1732,7 @@ static DWORD WINAPI BootCheckThread(LPVOID param)
 		if ((partition_type == PARTITION_STYLE_MBR) && HAS_SYSLINUX(img_report)) {
 			if (SL_MAJOR(img_report.sl_version) < 5) {
 				IGNORE_RETVAL(_chdirU(app_data_dir));
-				for (i=0; i<NB_OLD_C32; i++) {
+				for (i = 0; i<NB_OLD_C32; i++) {
 					if (img_report.has_old_c32[i]) {
 						if (!in_files_dir) {
 							IGNORE_RETVAL(_mkdir(FILES_DIR));
