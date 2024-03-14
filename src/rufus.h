@@ -25,6 +25,8 @@
 #pragma warning(disable: 6258)		// I know what I'm using TerminateThread for
 #pragma warning(disable: 26451)		// Stop bugging me with casts already!
 #pragma warning(disable: 28159)		// I'll keep using GetVersionEx(), thank you very much...
+// Enable C11's _Static_assert (requires VS2015 or later)
+#define _Static_assert static_assert
 #endif
 
 #pragma once
@@ -106,6 +108,7 @@
 #define FAT32_CLUSTER_THRESHOLD     1.011f		// For FAT32, cluster size changes don't occur at power of 2 boundaries but slightly above
 #define DD_BUFFER_SIZE              (32 * 1024 * 1024)	// Minimum size of buffer to use for DD operations
 #define UBUFFER_SIZE                4096
+#define ISO_BUFFER_SIZE             (64 * KB)	// Buffer size used for ISO data extraction
 #define RSA_SIGNATURE_SIZE          256
 #define CBN_SELCHANGE_INTERNAL      (CBN_SELCHANGE + 256)
 #if defined(RUFUS_TEST)
@@ -260,6 +263,7 @@ enum action_type {
 	OP_FILE_COPY,
 	OP_PATCH,
 	OP_FINALIZE,
+	OP_EXTRACT_ZIP,
 	OP_MAX
 };
 
@@ -388,7 +392,6 @@ typedef struct {
 	char efi_boot_path[ARCH_MAX][30];	// paths of detected UEFI bootloaders
 	char efi_img_path[128];				// path to an efi.img file
 	uint64_t image_size;
-	uint64_t archive_size;
 	uint64_t projected_size;
 	int64_t mismatch_size;
 	uint32_t wininst_version;
@@ -658,6 +661,7 @@ extern SIZE GetTextSize(HWND hCtrl, char* txt);
 extern BOOL ExtractAppIcon(const char* filename, BOOL bSilent);
 extern BOOL ExtractDOS(const char* path);
 extern BOOL ExtractISO(const char* src_iso, const char* dest_dir, BOOL scan);
+extern BOOL ExtractZip(const char* src_zip, const char* dest_dir);
 extern int64_t ExtractISOFile(const char* iso, const char* iso_file, const char* dest_file, DWORD attributes);
 extern BOOL CopySKUSiPolicy(const char* drive_name);
 extern BOOL HasEfiImgBootLoaders(void);
