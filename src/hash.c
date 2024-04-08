@@ -5,7 +5,7 @@
  * Copyright © 2004-2019 Tom St Denis
  * Copyright © 2004 g10 Code GmbH
  * Copyright © 2002-2015 Wei Dai & Igor Pavlov
- * Copyright © 2015-2023 Pete Batard <pete@akeo.ie>
+ * Copyright © 2015-2024 Pete Batard <pete@akeo.ie>
  * Copyright © 2022 Jeffrey Walton <noloader@gmail.com>
  * Copyright © 2016 Alexander Graf
  *
@@ -60,6 +60,7 @@
 #endif
 
 #include <stdio.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
@@ -97,34 +98,24 @@
 #define BUFFER_SIZE         (64*KB)
 #define WAIT_TIME           5000
 
-/* Blocksize for each algorithm - Must be a power of 2 */
-#define MD5_BLOCKSIZE       64
-#define SHA1_BLOCKSIZE      64
-#define SHA256_BLOCKSIZE    64
-#define SHA512_BLOCKSIZE    128
-#define MAX_BLOCKSIZE       SHA512_BLOCKSIZE
-
-/* Hashsize for each algorithm */
-#define MD5_HASHSIZE        16
-#define SHA1_HASHSIZE       20
-#define SHA256_HASHSIZE     32
-#define SHA512_HASHSIZE     64
-#define MAX_HASHSIZE        SHA512_HASHSIZE
-
 /* Number of buffers we work with */
 #define NUM_BUFFERS         3   // 2 + 1 as a mere double buffered async I/O
                                 // would modify the buffer being processed.
 
 /* Globals */
 char hash_str[HASH_MAX][150];
-uint32_t proc_bufnum, hash_count[HASH_MAX] = { MD5_HASHSIZE, SHA1_HASHSIZE, SHA256_HASHSIZE, SHA512_HASHSIZE };
 HANDLE data_ready[HASH_MAX] = { 0 }, thread_ready[HASH_MAX] = { 0 };
 DWORD read_size[NUM_BUFFERS];
-BOOL enable_extra_hashes = FALSE;
+BOOL enable_extra_hashes = FALSE, validate_md5sum = FALSE;
 uint8_t ALIGNED(64) buffer[NUM_BUFFERS][BUFFER_SIZE];
-extern int default_thread_priority;
-uint32_t pe256ssp_size = 0;
 uint8_t* pe256ssp = NULL;
+uint32_t proc_bufnum, hash_count[HASH_MAX] = { MD5_HASHSIZE, SHA1_HASHSIZE, SHA256_HASHSIZE, SHA512_HASHSIZE };
+uint32_t pe256ssp_size = 0;
+uint64_t md5sum_totalbytes;
+StrArray modified_files = { 0 };
+
+extern int default_thread_priority;
+extern const char* efi_bootname[ARCH_MAX];
 
 /*
  * Rotate 32 or 64 bit integers by n bytes.
@@ -177,16 +168,6 @@ static const uint64_t K512[80] = {
 	0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL, 0x431d67c49c100d4cULL,
 	0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
 };
-
-/*
- * For convenience, we use a common context for all the hash algorithms,
- * which means some elements may be unused...
- */
-typedef struct ALIGNED(64) {
-	uint8_t buf[MAX_BLOCKSIZE];
-	uint64_t state[8];
-	uint64_t bytecount;
-} HASH_CONTEXT;
 
 static void md5_init(HASH_CONTEXT *ctx)
 {
@@ -1467,9 +1448,6 @@ static void null_write(HASH_CONTEXT *ctx, const uint8_t *buf, size_t len) { }
 static void null_final(HASH_CONTEXT *ctx) { }
 #endif
 
-typedef void hash_init_t(HASH_CONTEXT *ctx);
-typedef void hash_write_t(HASH_CONTEXT *ctx, const uint8_t *buf, size_t len);
-typedef void hash_final_t(HASH_CONTEXT *ctx);
 hash_init_t *hash_init[HASH_MAX] = { md5_init, sha1_init , sha256_init, sha512_init };
 hash_write_t *hash_write[HASH_MAX] = { md5_write, sha1_write , sha256_write, sha512_write };
 hash_final_t *hash_final[HASH_MAX] = { md5_final, sha1_final , sha256_final, sha512_final };
@@ -1490,7 +1468,7 @@ BOOL HashFile(const unsigned type, const char* path, uint8_t* hash)
 	h = CreateFileU(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (h == INVALID_HANDLE_VALUE) {
 		uprintf("Could not open file: %s", WindowsErrorString());
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_OPEN_FAILED;
+		ErrorStatus = RUFUS_ERROR(ERROR_OPEN_FAILED);
 		goto out;
 	}
 
@@ -1498,7 +1476,7 @@ BOOL HashFile(const unsigned type, const char* path, uint8_t* hash)
 	for (rb = 0; ; rb += rs) {
 		CHECK_FOR_USER_CANCEL;
 		if (!ReadFile(h, buf, sizeof(buf), &rs, NULL)) {
-			FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_READ_FAULT;
+			ErrorStatus = RUFUS_ERROR(ERROR_READ_FAULT);
 			uprintf("  Read error: %s", WindowsErrorString());
 			goto out;
 		}
@@ -2005,7 +1983,7 @@ DWORD WINAPI HashThread(void* param)
 	fd = CreateFileAsync(image_path, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN);
 	if (fd == NULL) {
 		uprintf("Could not open file: %s", WindowsErrorString());
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_OPEN_FAILED;
+		ErrorStatus = RUFUS_ERROR(ERROR_OPEN_FAILED);
 		goto out;
 	}
 
@@ -2026,7 +2004,7 @@ DWORD WINAPI HashThread(void* param)
 		if ((!WaitFileAsync(fd, DRIVE_ACCESS_TIMEOUT)) ||
 			(!GetSizeAsync(fd, &read_size[read_bufnum]))) {
 			uprintf("Read error: %s", WindowsErrorString());
-			FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_READ_FAULT;
+			ErrorStatus = RUFUS_ERROR(ERROR_READ_FAULT);
 			goto out;
 		}
 
@@ -2147,6 +2125,137 @@ void PrintRevokedBootloaderInfo(void)
 		uprintf("Found %d additional revoked UEFI bootloaders from this system's SKUSiPolicy.p7b", pe256ssp_size);
 	else
 		uprintf("WARNING: Could not parse this system's SkuSiPolicy.p7b for additional revoked UEFI bootloaders");
+}
+
+/*
+ * Updates the MD5SUMS/md5sum.txt file that some distros (Ubuntu, Mint...)
+ * use to validate the media. Because we may alter some of the validated files
+ * to add persistence and whatnot, we need to alter the MD5 list as a result.
+ * The format of the file is expected to always be "<MD5SUM> <FILE_PATH>" on
+ * individual lines.
+ * This function is also used to finalize the md5sum.txt we create for use with
+ * our uefi-md5sum bootloaders.
+ */
+void UpdateMD5Sum(const char* dest_dir, const char* md5sum_name)
+{
+	BOOL display_header = TRUE;
+	BYTE* res_data;
+	DWORD res_size;
+	HANDLE hFile;
+	intptr_t pos;
+	uint32_t i, j, size, md5_size, new_size;
+	uint8_t sum[MD5_HASHSIZE];
+	char md5_path[64], path1[64], path2[64], *md5_data = NULL, *new_data = NULL, *str_pos;
+	char *d, *s, *p;
+
+	if (!img_report.has_md5sum && !validate_md5sum)
+		goto out;
+
+	static_sprintf(md5_path, "%s\\%s", dest_dir, md5sum_name);
+	md5_size = read_file(md5_path, (uint8_t**)&md5_data);
+	if (md5_size == 0)
+		goto out;
+
+	for (i = 0; i < modified_files.Index; i++) {
+		for (j = 0; j < (uint32_t)strlen(modified_files.String[i]); j++)
+			if (modified_files.String[i][j] == '\\')
+				modified_files.String[i][j] = '/';
+		str_pos = strstr(md5_data, &modified_files.String[i][2]);
+		if (str_pos == NULL)
+			// File is not listed in md5 sums
+			continue;
+		if (display_header) {
+			uprintf("Updating %s:", md5_path);
+			display_header = FALSE;
+		}
+		uprintf("● %s", &modified_files.String[i][2]);
+		pos = str_pos - md5_data;
+		HashFile(HASH_MD5, modified_files.String[i], sum);
+		while ((pos > 0) && (md5_data[pos - 1] != '\n'))
+			pos--;
+		assert(IS_HEXASCII(md5_data[pos]));
+		for (j = 0; j < 16; j++) {
+			md5_data[pos + 2 * j] = ((sum[j] >> 4) < 10) ? ('0' + (sum[j] >> 4)) : ('a' - 0xa + (sum[j] >> 4));
+			md5_data[pos + 2 * j + 1] = ((sum[j] & 15) < 10) ? ('0' + (sum[j] & 15)) : ('a' - 0xa + (sum[j] & 15));
+		}
+	}
+
+	// If we validate md5sum we need to update the original bootloader names and add md5sum_totalbytes
+	if (validate_md5sum) {
+		new_size = md5_size;
+		new_data = malloc(md5_size + 1024);
+		assert(new_data != NULL);
+		if (new_data == NULL)
+			goto out;
+		// Will be nonzero if we created the file, otherwise zero
+		if (md5sum_totalbytes != 0) {
+			snprintf(new_data, md5_size + 1024, "# md5sum_totalbytes = 0x%llx\n", md5sum_totalbytes);
+			new_size += (uint32_t)strlen(new_data);
+			d = &new_data[strlen(new_data)];
+		} else {
+			d = new_data;
+		}
+		s = md5_data;
+		for (p = md5_data; (p = StrStrIA(p, " ./efi/boot/boot")) != NULL; ) {
+			for (i = 1; i < ARRAYSIZE(efi_bootname); i++) {
+				if (p[12 + strlen(efi_bootname[i])] != 0x0a)
+					continue;
+				p[12 + strlen(efi_bootname[i])] = 0;
+				if (lstrcmpiA(&p[12], efi_bootname[i]) == 0) {
+					res_data = (BYTE*)GetResource(hMainInstance, MAKEINTRESOURCEA(IDR_MD5_BOOT + i),
+						_RT_RCDATA, efi_bootname[i], &res_size, FALSE);
+					static_sprintf(path1, "%s\\%s", dest_dir, &p[3]);
+					for (j = 0; j < strlen(path1); j++)
+						if (path1[j] == '/') path1[j] = '\\';
+					static_strcpy(path2, path1);
+					path2[strlen(path2) - 4] = 0;
+					static_strcat(path2, "_original.efi");
+					if (res_data != NULL && MoveFileU(path1, path2)) {
+						uprintf("Renamed: %s → %s", path1, path2);
+						hFile = CreateFileA(path1, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL,
+							CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+						if ((hFile == NULL) || (hFile == INVALID_HANDLE_VALUE)) {
+							uprintf("Could not create '%s': %s.", path1, WindowsErrorString());
+							MoveFileU(path2, path1);
+							continue;
+						}
+						if (!WriteFileWithRetry(hFile, res_data, res_size, NULL, WRITE_RETRIES)) {
+							uprintf("Could not write '%s': %s.", path1, WindowsErrorString());
+							safe_closehandle(hFile);
+							MoveFileU(path2, path1);
+							continue;
+						}
+						safe_closehandle(hFile);
+						uprintf("Created: %s (%s)", path1, SizeToHumanReadable(res_size, FALSE, FALSE));
+						size = (uint32_t)(p - s) + 12 + (uint32_t)strlen(efi_bootname[i]) - 4;
+						memcpy(d, s, size);
+						d = &d[size];
+						strcpy(d, "_original.efi\n");
+						new_size += 9;
+						d = &d[14];
+						s = &p[12 + strlen(efi_bootname[i]) + 1];
+						// TODO: Update sources/boot.wim if we modified it
+						// Also, we'll need to keep a copy of the size of boot.wim BEFORE we alter it
+						// so we can adjust md5sum_totalbytes
+					}
+				}
+				p[12 + strlen(efi_bootname[i])] = 0x0a;
+			}
+			p = &p[12];
+		}
+		p = &md5_data[md5_size];
+		memcpy(d, s, p - s);
+		free(md5_data);
+		md5_data = new_data;
+		md5_size = new_size;
+	}
+
+	write_file(md5_path, md5_data, md5_size);
+	free(md5_data);
+
+out:
+	// We no longer need the string array at this stage
+	StrArrayDestroy(&modified_files);
 }
 
 #if defined(_DEBUG) || defined(TEST) || defined(ALPHA)

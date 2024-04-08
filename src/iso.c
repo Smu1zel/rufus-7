@@ -82,8 +82,10 @@ typedef struct {
 
 RUFUS_IMG_REPORT img_report;
 int64_t iso_blocking_status = -1;
-extern BOOL preserve_timestamps, enable_ntfs_compression;
+extern uint64_t md5sum_totalbytes;
+extern BOOL preserve_timestamps, enable_ntfs_compression, validate_md5sum;
 extern HANDLE format_thread;
+extern StrArray modified_files;
 BOOL enable_iso = TRUE, enable_joliet = TRUE, enable_rockridge = TRUE, has_ldlinux_c32;
 #define ISO_BLOCKING(x) do {x; iso_blocking_status++; } while(0)
 static const char* psz_extract_dir;
@@ -92,7 +94,7 @@ const char* bootmgr_efi_name = "bootmgr.efi";
 static const char* grldr_name = "grldr";
 static const char* ldlinux_name = "ldlinux.sys";
 static const char* ldlinux_c32 = "ldlinux.c32";
-static const char* md5sum_name[] = { "MD5SUMS", "md5sum.txt" };
+const char* md5sum_name[2] = { "md5sum.txt", "MD5SUMS" };
 static const char* casper_dirname = "/casper";
 static const char* proxmox_dirname = "/proxmox";
 const char* efi_dirname = "/efi/boot";
@@ -122,10 +124,12 @@ static const char* stupid_antivirus = "  NOTE: This is usually caused by a poorl
 const char* old_c32_name[NB_OLD_C32] = OLD_C32_NAMES;
 static const int64_t old_c32_threshold[NB_OLD_C32] = OLD_C32_THRESHOLD;
 static uint8_t joliet_level = 0;
+static uint32_t md5sum_size = 0;
 static uint64_t total_blocks, extra_blocks, nb_blocks, last_nb_blocks;
 static BOOL scan_only = FALSE;
-static StrArray config_path, isolinux_path, modified_path;
-static char symlinked_syslinux[MAX_PATH];
+static FILE* fd_md5sum = NULL;
+static StrArray config_path, isolinux_path;
+static char symlinked_syslinux[MAX_PATH], *md5sum_data = NULL, *md5sum_pos = NULL;
 
 // Ensure filenames do not contain invalid FAT32 or NTFS characters
 static __inline char* sanitize_filename(char* filename, BOOL* is_identical)
@@ -475,65 +479,52 @@ static void fix_config(const char* psz_fullpath, const char* psz_path, const cha
 	}
 
 	if (modified)
-		StrArrayAdd(&modified_path, psz_fullpath, TRUE);
+		StrArrayAdd(&modified_files, psz_fullpath, TRUE);
 
 	free(src);
 }
 
-// This updates the MD5SUMS/md5sum.txt file that some distros (Ubuntu, Mint...)
-// use to validate the media. Because we may alter some of the validated files
-// to add persistence and whatnot, we need to alter the MD5 list as a result.
-// The format of the file is expected to always be "<MD5SUM> <FILE_PATH>" on
-// individual lines.
-static void update_md5sum(void)
+// Returns TRUE if a path appears in md5sum.txt
+static BOOL is_in_md5sum(char* path)
 {
-	BOOL display_header = TRUE;
-	intptr_t pos;
-	uint32_t i, j, size, md5_size;
-	uint8_t* buf = NULL, sum[16];
-	char md5_path[64], * md5_data = NULL, * str_pos;
+	BOOL found = FALSE;
+	char c[3], *p;
 
-	if (!img_report.has_md5sum)
-		goto out;
+	// If we are creating the md5sum file from scratch, every file is in it.
+	if (fd_md5sum != NULL)
+		return TRUE;
 
-	assert(img_report.has_md5sum <= ARRAYSIZE(md5sum_name));
-	if (img_report.has_md5sum > ARRAYSIZE(md5sum_name))
-		goto out;
+	// If we don't have an existing file at this stage, then no file is in it.
+	if (md5sum_size == 0 || md5sum_data == NULL)
+		return FALSE;
 
-	static_sprintf(md5_path, "%s\\%s", psz_extract_dir, md5sum_name[img_report.has_md5sum - 1]);
-	md5_size = read_file(md5_path, (uint8_t**)&md5_data);
-	if (md5_size == 0)
-		goto out;
+	// We should have a "X:/xyz" path
+	assert(path[1] == ':' && path[2] == '/');
 
-	for (i = 0; i < modified_path.Index; i++) {
-		str_pos = strstr(md5_data, &modified_path.String[i][2]);
-		if (str_pos == NULL)
-			// File is not listed in md5 sums
-			continue;
-		if (display_header) {
-			uprintf("Updating %s:", md5_path);
-			display_header = FALSE;
-		}
-		uprintf("● %s", &modified_path.String[i][2]);
-		pos = str_pos - md5_data;
-		size = read_file(modified_path.String[i], &buf);
-		if (size == 0)
-			continue;
-		HashBuffer(HASH_MD5, buf, size, sum);
-		free(buf);
-		while ((pos > 0) && (md5_data[pos - 1] != '\n'))
-			pos--;
-		for (j = 0; j < 16; j++) {
-			md5_data[pos + 2 * j] = ((sum[j] >> 4) < 10) ? ('0' + (sum[j] >> 4)) : ('a' - 0xa + (sum[j] >> 4));
-			md5_data[pos + 2 * j + 1] = ((sum[j] & 15) < 10) ? ('0' + (sum[j] & 15)) : ('a' - 0xa + (sum[j] & 15));
-		}
+	// Modify the path to have " ./xyz"
+	c[0] = path[0];
+	c[1] = path[1];
+	path[0] = ' ';
+	path[1] = '.';
+
+	// Search for the string in the remainder of the md5sum.txt
+	// NB: md5sum_data is always NUL terminated.
+	p = strstr(md5sum_pos, path);
+	found = (p != NULL);
+	// If not found in remainder and we have a remainder, loop to search from beginning
+	if (!found && md5sum_pos != md5sum_data) {
+		c[2] = *md5sum_pos;
+		*md5sum_pos = 0;
+		p = strstr(md5sum_data, path);
+		*md5sum_pos = c[2];
+		found = (p != NULL);
 	}
 
-	write_file(md5_path, md5_data, md5_size);
-	free(md5_data);
-
-out:
-	StrArrayDestroy(&modified_path);
+	path[0] = c[0];
+	path[1] = c[1];
+	if (found)
+		md5sum_pos = p + strlen(path);
+	return found;
 }
 
 static void print_extracted_file(char* psz_fullpath, uint64_t file_length)
@@ -553,6 +544,9 @@ static void print_extracted_file(char* psz_fullpath, uint64_t file_length)
 	psz_fullpath[nul_pos] = 0;
 	// ISO9660 cannot handle backslashes
 	to_unix_path(psz_fullpath);
+	// Update md5sum_totalbytes as needed
+	if (is_in_md5sum(psz_fullpath))
+		md5sum_totalbytes += file_length;
 }
 
 // Convert from time_t to FILETIME
@@ -586,9 +580,10 @@ static int udf_extract_files(udf_t *p_udf, udf_dirent_t *p_udf_dirent, const cha
 	HANDLE file_handle = NULL;
 	DWORD buf_size, wr_size, err;
 	EXTRACT_PROPS props;
+	HASH_CONTEXT ctx;
 	BOOL r, is_identical;
 	int length;
-	size_t i, nb;
+	size_t i, j, nb;
 	char tmp[128], *psz_fullpath = NULL, *psz_sanpath = NULL;
 	const char* psz_basename;
 	udf_dirent_t *p_udf_dirent2;
@@ -605,7 +600,7 @@ static int udf_extract_files(udf_t *p_udf, udf_dirent_t *p_udf_dirent, const cha
 	if (psz_path[0] == 0)
 		UpdateProgressWithInfoInit(NULL, TRUE);
 	while ((p_udf_dirent = udf_readdir(p_udf_dirent)) != NULL) {
-		if (FormatStatus) goto out;
+		if (ErrorStatus) goto out;
 		psz_basename = udf_get_filename(p_udf_dirent);
 		if (strlen(psz_basename) == 0)
 			continue;
@@ -669,16 +664,20 @@ static int udf_extract_files(udf_t *p_udf, udf_dirent_t *p_udf_dirent, const cha
 				else
 					goto out;
 			} else {
+				if (fd_md5sum != NULL)
+					hash_init[HASH_MD5](&ctx);
 				while (file_length > 0) {
-					if (FormatStatus)
+					if (ErrorStatus)
 						goto out;
-					nb = MIN(ISO_BUFFER_SIZE / UDF_BLOCKSIZE, (file_length + UDF_BLOCKSIZE - 1) / UDF_BLOCKSIZE);
+					nb = (size_t)MIN(ISO_BUFFER_SIZE / UDF_BLOCKSIZE, (file_length + UDF_BLOCKSIZE - 1) / UDF_BLOCKSIZE);
 					read = udf_read_block(p_udf_dirent, buf, nb);
 					if (read < 0) {
 						uprintf("  Error reading UDF file %s", &psz_fullpath[strlen(psz_extract_dir)]);
 						goto out;
 					}
 					buf_size = (DWORD)MIN(file_length, read);
+					if (fd_md5sum != NULL)
+						hash_write[HASH_MD5](&ctx, buf, buf_size);
 					ISO_BLOCKING(r = WriteFileWithRetry(file_handle, buf, buf_size, &wr_size, WRITE_RETRIES));
 					if (!r || (wr_size != buf_size)) {
 						uprintf("  Error writing file: %s", r ? "Short write detected" : WindowsErrorString());
@@ -690,6 +689,12 @@ static int udf_extract_files(udf_t *p_udf, udf_dirent_t *p_udf_dirent, const cha
 						UpdateProgressWithInfo(OP_FILE_COPY, MSG_231, nb_blocks, total_blocks);
 						last_nb_blocks = nb_blocks;
 					}
+				}
+				if (fd_md5sum != NULL) {
+					hash_final[HASH_MD5](&ctx);
+					for (j = 0; j < MD5_HASHSIZE; j++)
+						fprintf(fd_md5sum, "%02x", ctx.buf[j]);
+					fprintf(fd_md5sum, "  ./%s\n", &psz_fullpath[3]);
 				}
 			}
 			if ((preserve_timestamps) && (!SetFileTime(file_handle, to_filetime(udf_get_attribute_time(p_udf_dirent)),
@@ -726,6 +731,7 @@ static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 	HANDLE file_handle = NULL;
 	DWORD buf_size, wr_size, err;
 	EXTRACT_PROPS props;
+	HASH_CONTEXT ctx;
 	BOOL is_symlink, is_identical, create_file, free_p_statbuf = FALSE;
 	int length, r = 1;
 	char psz_fullpath[MAX_PATH], *psz_basename = NULL, *psz_sanpath = NULL;
@@ -737,7 +743,7 @@ static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 	CdioListNode_t* p_entnode;
 	iso9660_stat_t *p_statbuf;
 	CdioISO9660FileList_t* p_entlist = NULL;
-	size_t i, nb;
+	size_t i, j, nb;
 	lsn_t lsn;
 	int64_t file_length;
 
@@ -760,7 +766,7 @@ static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 	if (psz_path[0] == 0)
 		UpdateProgressWithInfoInit(NULL, TRUE);
 	_CDIO_LIST_FOREACH(p_entnode, p_entlist) {
-		if (FormatStatus) goto out;
+		if (ErrorStatus) goto out;
 		p_statbuf = (iso9660_stat_t*) _cdio_list_node_data(p_entnode);
 		free_p_statbuf = FALSE;
 		if (scan_only && (p_statbuf->rr.b3_rock == yep) && enable_rockridge) {
@@ -921,28 +927,40 @@ static int iso_extract_files(iso9660_t* p_iso, const char *psz_path)
 						uprintf("  Error writing file: %s", WindowsErrorString());
 						goto out;
 					}
-				} else for (i = 0; file_length > 0; i += nb) {
-					if (FormatStatus)
-						goto out;
-					lsn = p_statbuf->lsn + (lsn_t)i;
-					nb = MIN(ISO_BUFFER_SIZE / ISO_BLOCKSIZE, (file_length + ISO_BLOCKSIZE - 1) / ISO_BLOCKSIZE);
-					if (iso9660_iso_seek_read(p_iso, buf, lsn, (long)nb) != (nb * ISO_BLOCKSIZE)) {
-						uprintf("  Error reading ISO9660 file %s at LSN %lu",
-							psz_iso_name, (long unsigned int)lsn);
-						goto out;
+				} else {
+					if (fd_md5sum != NULL)
+						hash_init[HASH_MD5](&ctx);
+					for (i = 0; file_length > 0; i += nb) {
+						if (ErrorStatus)
+							goto out;
+						lsn = p_statbuf->lsn + (lsn_t)i;
+						nb = (size_t)MIN(ISO_BUFFER_SIZE / ISO_BLOCKSIZE, (file_length + ISO_BLOCKSIZE - 1) / ISO_BLOCKSIZE);
+						if (iso9660_iso_seek_read(p_iso, buf, lsn, (long)nb) != (nb * ISO_BLOCKSIZE)) {
+							uprintf("  Error reading ISO9660 file %s at LSN %lu",
+								psz_iso_name, (long unsigned int)lsn);
+							goto out;
+						}
+						buf_size = (DWORD)MIN(file_length, ISO_BUFFER_SIZE);
+						if (fd_md5sum != NULL)
+							hash_write[HASH_MD5](&ctx, buf, buf_size);
+						ISO_BLOCKING(r = WriteFileWithRetry(file_handle, buf, buf_size, &wr_size, WRITE_RETRIES));
+						if (!r || wr_size != buf_size) {
+							uprintf("  Error writing file: %s", r ? "Short write detected" : WindowsErrorString());
+							goto out;
+						}
+						file_length -= wr_size;
+						nb_blocks += nb;
+						if (nb_blocks - last_nb_blocks >= PROGRESS_THRESHOLD) {
+							UpdateProgressWithInfo(OP_FILE_COPY, MSG_231, nb_blocks, total_blocks +
+								((fs_type != FS_NTFS) ? extra_blocks : 0));
+							last_nb_blocks = nb_blocks;
+						}
 					}
-					buf_size = (DWORD)MIN(file_length, ISO_BUFFER_SIZE);
-					ISO_BLOCKING(r = WriteFileWithRetry(file_handle, buf, buf_size, &wr_size, WRITE_RETRIES));
-					if (!r || wr_size != buf_size) {
-						uprintf("  Error writing file: %s", r ? "Short write detected" : WindowsErrorString());
-						goto out;
-					}
-					file_length -= wr_size;
-					nb_blocks += nb;
-					if (nb_blocks - last_nb_blocks >= PROGRESS_THRESHOLD) {
-						UpdateProgressWithInfo(OP_FILE_COPY, MSG_231, nb_blocks, total_blocks +
-							((fs_type != FS_NTFS) ? extra_blocks : 0));
-						last_nb_blocks = nb_blocks;
+					if (fd_md5sum != NULL) {
+						hash_final[HASH_MD5](&ctx);
+						for (j = 0; j < MD5_HASHSIZE; j++)
+							fprintf(fd_md5sum, "%02x", ctx.buf[j]);
+						fprintf(fd_md5sum, "  ./%s\n", &psz_fullpath[3]);
 					}
 				}
 				if (preserve_timestamps) {
@@ -1091,14 +1109,27 @@ BOOL ExtractISO(const char* src_iso, const char* dest_dir, BOOL scan)
 		IGNORE_RETVAL(_chdirU(app_data_dir));
 		if (total_blocks == 0) {
 			uprintf("Error: ISO has not been properly scanned.");
-			FormatStatus = ERROR_SEVERITY_ERROR|FAC(FACILITY_STORAGE)|APPERR(ERROR_ISO_SCAN);
+			ErrorStatus = RUFUS_ERROR(APPERR(ERROR_ISO_SCAN));
 			goto out;
 		}
 		nb_blocks = 0;
 		last_nb_blocks = 0;
 		iso_blocking_status = 0;
 		symlinked_syslinux[0] = 0;
-		StrArrayCreate(&modified_path, 8);
+		StrArrayCreate(&modified_files, 8);
+		if (validate_md5sum) {
+			md5sum_totalbytes = 0;
+			// If there isn't an already existing md5sum.txt create one
+			if (img_report.has_md5sum != 1) {
+				static_sprintf(path, "%s\\%s", dest_dir, md5sum_name[0]);
+				fd_md5sum = fopenU(path, "wb");
+				if (fd_md5sum == NULL)
+					uprintf("WARNING: Could not create '%s'", md5sum_name[0]);
+			} else {
+				md5sum_size = ReadISOFileToBuffer(src_iso, md5sum_name[0], &md5sum_data);
+				md5sum_pos = md5sum_data;
+			}
+		}
 	}
 
 	// First try to open as UDF - fallback to ISO if it failed
@@ -1397,12 +1428,18 @@ out:
 					uprintf("Could not move %s → %s", path, dst_path, WindowsErrorString());
 			}
 		}
-		update_md5sum();
+		if (fd_md5sum != NULL) {
+			uprintf("Created: %s\\%s (%s)", dest_dir, md5sum_name[0], SizeToHumanReadable(ftell(fd_md5sum), FALSE, FALSE));
+			fclose(fd_md5sum);
+		} else if (md5sum_data != NULL) {
+			safe_free(md5sum_data);
+			md5sum_size = 0;
+		}
 	}
 	iso9660_close(p_iso);
 	udf_close(p_udf);
-	if ((r != 0) && (FormatStatus == 0))
-		FormatStatus = ERROR_SEVERITY_ERROR|FAC(FACILITY_STORAGE)|APPERR((scan_only?ERROR_ISO_SCAN:ERROR_ISO_EXTRACT));
+	if ((r != 0) && (ErrorStatus == 0))
+		ErrorStatus = RUFUS_ERROR(APPERR(scan_only ? ERROR_ISO_SCAN : ERROR_ISO_EXTRACT));
 	return (r == 0);
 }
 
@@ -1502,6 +1539,97 @@ out:
 	iso9660_close(p_iso);
 	udf_close(p_udf);
 	return r;
+}
+
+/*
+ * Extract a file to a buffer. Buffer must be freed by the caller.
+ */
+uint32_t ReadISOFileToBuffer(const char* iso, const char* iso_file, uint8_t** buf)
+{
+	ssize_t read_size;
+	int64_t file_length;
+	uint32_t ret = 0, nb_blocks;
+	iso9660_t* p_iso = NULL;
+	udf_t* p_udf = NULL;
+	udf_dirent_t *p_udf_root = NULL, *p_udf_file = NULL;
+	iso9660_stat_t* p_statbuf = NULL;
+
+	*buf = NULL;
+
+	// First try to open as UDF - fallback to ISO if it failed
+	p_udf = udf_open(iso);
+	if (p_udf == NULL)
+		goto try_iso;
+	p_udf_root = udf_get_root(p_udf, true, 0);
+	if (p_udf_root == NULL) {
+		uprintf("Could not locate UDF root directory");
+		goto out;
+	}
+	p_udf_file = udf_fopen(p_udf_root, iso_file);
+	if (!p_udf_file) {
+		uprintf("Could not locate file %s in ISO image", iso_file);
+		goto out;
+	}
+	file_length = udf_get_file_length(p_udf_file);
+	if (file_length > UINT32_MAX) {
+		uprintf("Only files smaller than 4 GB are supported");
+		goto out;
+	}
+	nb_blocks = (uint32_t)((file_length + UDF_BLOCKSIZE - 1) / UDF_BLOCKSIZE);
+	*buf = malloc(nb_blocks * UDF_BLOCKSIZE + 1);
+	if (*buf == NULL) {
+		uprintf("Could not allocate buffer for file %s", iso_file);
+		goto out;
+	}
+	read_size = udf_read_block(p_udf_file, *buf, nb_blocks);
+	if (read_size < 0 || read_size != file_length) {
+		uprintf("Error reading UDF file %s", iso_file);
+		goto out;
+	}
+	ret = (uint32_t)file_length;
+	(*buf)[ret] = 0;
+	goto out;
+
+try_iso:
+	// Make sure to enable extensions, else we may not match the name of the file we are looking
+	// for since Rock Ridge may be needed to translate something like 'I386_PC' into 'i386-pc'...
+	p_iso = iso9660_open_ext(iso, ISO_EXTENSION_MASK);
+	if (p_iso == NULL) {
+		uprintf("Unable to open image '%s'", iso);
+		goto out;
+	}
+	p_statbuf = iso9660_ifs_stat_translate(p_iso, iso_file);
+	if (p_statbuf == NULL) {
+		uprintf("Could not get ISO-9660 file information for file %s", iso_file);
+		goto out;
+	}
+	file_length = p_statbuf->total_size;
+	if (file_length > UINT32_MAX) {
+		uprintf("Only files smaller than 4 GB are supported");
+		goto out;
+	}
+	nb_blocks = (uint32_t)((file_length + ISO_BLOCKSIZE - 1) / ISO_BLOCKSIZE);
+	*buf = malloc(nb_blocks * ISO_BLOCKSIZE + 1);
+	if (*buf == NULL) {
+		uprintf("Could not allocate buffer for file %s", iso_file);
+		goto out;
+	}
+	if (iso9660_iso_seek_read(p_iso, *buf, p_statbuf->lsn, nb_blocks) != nb_blocks * ISO_BLOCKSIZE) {
+		uprintf("Error reading ISO file %s", iso_file);
+		goto out;
+	}
+	ret = (uint32_t)file_length;
+	(*buf)[ret] = 0;
+
+out:
+	iso9660_stat_free(p_statbuf);
+	udf_dirent_free(p_udf_root);
+	udf_dirent_free(p_udf_file);
+	iso9660_close(p_iso);
+	udf_close(p_udf);
+	if (ret == 0)
+		safe_free(*buf);
+	return ret;
 }
 
 uint32_t GetInstallWimVersion(const char* iso)
@@ -1779,8 +1907,8 @@ BOOL DumpFatDir(const char* path, int32_t cluster)
 				while ((s != 0) && (s < 0xFFFFFFFFULL) && (written < diritem.size)) {
 					buf = libfat_get_sector(lf_fs, s);
 					if (buf == NULL)
-						FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_SECTOR_NOT_FOUND;
-					if (IS_ERROR(FormatStatus))
+						ErrorStatus = RUFUS_ERROR(ERROR_SECTOR_NOT_FOUND);
+					if (IS_ERROR(ErrorStatus))
 						goto out;
 					size = MIN(LIBFAT_SECTOR_SIZE, diritem.size - written);
 					if (!WriteFileWithRetry(handle, buf, size, &size, WRITE_RETRIES) ||
@@ -1839,7 +1967,7 @@ static DWORD WINAPI IsoSaveImageThread(void* param)
 	hPhysicalDrive = CreateFileA(img_save->DevicePath, GENERIC_READ, FILE_SHARE_READ,
 		NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (hPhysicalDrive == INVALID_HANDLE_VALUE) {
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_OPEN_FAILED;
+		ErrorStatus = RUFUS_ERROR(ERROR_OPEN_FAILED);
 		goto out;
 	}
 
@@ -1851,13 +1979,13 @@ static DWORD WINAPI IsoSaveImageThread(void* param)
 		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (hDestImage == INVALID_HANDLE_VALUE) {
 		uprintf("Could not open image '%s': %s", img_save->ImagePath, WindowsErrorString());
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_OPEN_FAILED;
+		ErrorStatus = RUFUS_ERROR(ERROR_OPEN_FAILED);
 		goto out;
 	}
 
 	buffer = (uint8_t*)_mm_malloc(img_save->BufSize, 16);
 	if (buffer == NULL) {
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_NOT_ENOUGH_MEMORY;
+		ErrorStatus = RUFUS_ERROR(ERROR_NOT_ENOUGH_MEMORY);
 		uprintf("Could not allocate buffer");
 		goto out;
 	}
@@ -1877,7 +2005,7 @@ static DWORD WINAPI IsoSaveImageThread(void* param)
 		s = ReadFile(hPhysicalDrive, buffer,
 			(DWORD)MIN(img_save->BufSize, img_save->DeviceSize - wb), &rSize, NULL);
 		if (!s) {
-			FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_READ_FAULT;
+			ErrorStatus = RUFUS_ERROR(ERROR_READ_FAULT);
 			uprintf("Read error: %s", WindowsErrorString());
 			goto out;
 		}
@@ -1902,7 +2030,7 @@ static DWORD WINAPI IsoSaveImageThread(void* param)
 					goto out;
 				}
 			} else {
-				FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_WRITE_FAULT;
+				ErrorStatus = RUFUS_ERROR(ERROR_WRITE_FAULT);
 				goto out;
 			}
 			Sleep(200);
@@ -1913,7 +2041,7 @@ static DWORD WINAPI IsoSaveImageThread(void* param)
 	if (wb != img_save->DeviceSize) {
 		uprintf("Error: wrote %s, expected %s", SizeToHumanReadable(wb, FALSE, FALSE),
 			SizeToHumanReadable(img_save->DeviceSize, FALSE, FALSE));
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_WRITE_FAULT;
+		ErrorStatus = RUFUS_ERROR(ERROR_WRITE_FAULT);
 		goto out;
 	}
 	uprintf("Operation complete (Wrote %s).", SizeToHumanReadable(wb, FALSE, FALSE));
@@ -1954,7 +2082,7 @@ void IsoSaveImage(void)
 
 	uprintf("ISO media size %s", SizeToHumanReadable(img_save.DeviceSize, FALSE, FALSE));
 	SendMessage(hMainDialog, UM_PROGRESS_INIT, 0, 0);
-	FormatStatus = 0;
+	ErrorStatus = 0;
 	// Disable all controls except cancel
 	EnableControls(FALSE, FALSE);
 	InitProgress(TRUE);
@@ -1965,7 +2093,7 @@ void IsoSaveImage(void)
 		SendMessage(hMainDialog, UM_TIMER_START, 0, 0);
 	} else {
 		uprintf("Unable to start ISO save thread");
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | APPERR(ERROR_CANT_START_THREAD);
+		ErrorStatus = RUFUS_ERROR(APPERR(ERROR_CANT_START_THREAD));
 		safe_free(img_save.ImagePath);
 		PostMessage(hMainDialog, UM_FORMAT_COMPLETED, (WPARAM)FALSE, 0);
 	}

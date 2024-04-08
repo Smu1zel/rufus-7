@@ -58,7 +58,7 @@
 #define VDS_RESCAN_REFRESH                  0x00000001
 #define VDS_RESCAN_REENUMERATE              0x00000002
 
-#define VDS_SET_ERROR(hr) do { if (hr != S_OK) { SetLastError((DWORD)hr); FormatStatus = ERROR_SEVERITY_ERROR|FAC(FACILITY_STORAGE)|ERROR_GEN_FAILURE; } } while(0)
+#define VDS_SET_ERROR(hr) do { if (hr != S_OK) { SetLastError((DWORD)hr); ErrorStatus = RUFUS_ERROR(ERROR_GEN_FAILURE); } } while(0)
 
 #if !defined(__MINGW32__)
 typedef enum _FSINFOCLASS {
@@ -348,8 +348,7 @@ typedef struct _DRIVE_LAYOUT_INFORMATION_EX4 {
 } DRIVE_LAYOUT_INFORMATION_EX4, *PDRIVE_LAYOUT_INFORMATION_EX4;
 
 static __inline BOOL UnlockDrive(HANDLE hDrive) {
-	DWORD size;
-	return DeviceIoControl(hDrive, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, &size, NULL);
+	return DeviceIoControl(hDrive, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, NULL, NULL);
 }
 #define safe_unlockclose(h) do {if ((h != INVALID_HANDLE_VALUE) && (h != NULL)) {UnlockDrive(h); CloseHandle(h); h = INVALID_HANDLE_VALUE;}} while(0)
 

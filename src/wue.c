@@ -47,6 +47,9 @@ char *unattend_xml_path = NULL, unattend_username[MAX_USERNAME_LENGTH];
 BOOL is_bootloader_revoked = FALSE;
 
 extern uint32_t wim_nb_files, wim_proc_files, wim_extra_files;
+extern BOOL validate_md5sum;
+extern uint64_t md5sum_totalbytes;
+extern StrArray modified_files;
 
 /// <summary>
 /// Create an installation answer file containing the sections specified by the flags.
@@ -255,12 +258,12 @@ BOOL SetupWinPE(char drive_letter)
 	const char* patch_str_org[2] = { "\\minint\\txtsetup.sif", "\\minint\\system32\\" };
 	const char* patch_str_rep[2][2] = { { "\\i386\\txtsetup.sif", "\\i386\\system32\\" } ,
 										{ "\\amd64\\txtsetup.sif", "\\amd64\\system32\\" } };
+	const char* setupsrcdev = "SetupSourceDevice = \"\\device\\harddisk1\\partition1\"";
 	const char* win_nt_bt_org = "$win_nt$.~bt";
 	const char* rdisk_zero = "rdisk(0)";
 	const LARGE_INTEGER liZero = { {0, 0} };
-	char setupsrcdev[64];
 	HANDLE handle = INVALID_HANDLE_VALUE;
-	DWORD i, j, size, rw_size, index = 0;
+	DWORD i, j, size, read_size, index = 0;
 	BOOL r = FALSE;
 	char* buffer = NULL;
 
@@ -268,9 +271,6 @@ BOOL SetupWinPE(char drive_letter)
 		index = 1;
 	else if ((img_report.winpe & WINPE_MININT) == WINPE_MININT)
 		index = 2;
-	// Allow other values than harddisk 1, as per user choice for disk ID
-	static_sprintf(setupsrcdev, "SetupSourceDevice = \"\\device\\harddisk%d\\partition1\"",
-		ComboBox_GetCurSel(hDiskID));
 	// Copy of ntdetect.com in root
 	static_sprintf(src, "%c:\\%s\\ntdetect.com", toupper(drive_letter), basedir[2 * (index / 2)]);
 	static_sprintf(dst, "%c:\\ntdetect.com", toupper(drive_letter));
@@ -322,7 +322,7 @@ BOOL SetupWinPE(char drive_letter)
 	buffer = (char*)malloc(size);
 	if (buffer == NULL)
 		goto out;
-	if ((!ReadFile(handle, buffer, size, &rw_size, NULL)) || (size != rw_size)) {
+	if ((!ReadFile(handle, buffer, size, &read_size, NULL)) || (size != read_size)) {
 		uprintf("Could not read file %s: %s\n", dst, WindowsErrorString());
 		goto out;
 	}
@@ -356,7 +356,7 @@ BOOL SetupWinPE(char drive_letter)
 			// rdisk(0) -> rdisk(#) disk masquerading
 			// NB: only the first one seems to be needed
 			if (safe_strnicmp(&buffer[i], rdisk_zero, strlen(rdisk_zero) - 1) == 0) {
-				buffer[i + 6] = 0x30 + ComboBox_GetCurSel(hDiskID);
+				buffer[i + 6] = 0x31;
 				uprintf("  0x%08X: '%s' -> 'rdisk(%c)'\n", i, rdisk_zero, buffer[i + 6]);
 			}
 			// $WIN_NT$_~BT -> i386/amd64
@@ -370,7 +370,7 @@ BOOL SetupWinPE(char drive_letter)
 		}
 	}
 
-	if (!WriteFileWithRetry(handle, buffer, size, &rw_size, WRITE_RETRIES)) {
+	if (!WriteFileWithRetry(handle, buffer, size, NULL, WRITE_RETRIES)) {
 		uprintf("Could not write patched file: %s\n", WindowsErrorString());
 		goto out;
 	}
@@ -647,7 +647,7 @@ BOOL SetupWinToGo(DWORD DriveIndex, const char* drive_name, BOOL use_esp)
 	uprintf("Windows To Go mode selected");
 	// Additional sanity checks
 	if ((use_esp) && (SelectedDrive.MediaType != FixedMedia) && (WindowsVersion.BuildNumber < 15000)) {
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | ERROR_NOT_SUPPORTED;
+		ErrorStatus = RUFUS_ERROR(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 
@@ -655,7 +655,7 @@ BOOL SetupWinToGo(DWORD DriveIndex, const char* drive_name, BOOL use_esp)
 		mounted_iso = VhdMountImage(image_path);
 		if (mounted_iso == NULL) {
 			uprintf("Could not mount ISO for Windows To Go installation");
-			FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | APPERR(ERROR_ISO_EXTRACT);
+			ErrorStatus = RUFUS_ERROR(APPERR(ERROR_ISO_EXTRACT));
 			return FALSE;
 		}
 		static_sprintf(mounted_image_path, "%s%s", mounted_iso, &img_report.wininst_path[wininst_index][2]);
@@ -665,8 +665,8 @@ BOOL SetupWinToGo(DWORD DriveIndex, const char* drive_name, BOOL use_esp)
 	// Now we use the WIM API to apply that image
 	if (!WimApplyImage(img_report.is_windows_img ? image_path : mounted_image_path, wintogo_index, drive_name)) {
 		uprintf("Failed to apply Windows To Go image");
-		if (!IS_ERROR(FormatStatus))
-			FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | APPERR(ERROR_ISO_EXTRACT);
+		if (!IS_ERROR(ErrorStatus))
+			ErrorStatus = RUFUS_ERROR(APPERR(ERROR_ISO_EXTRACT));
 		if (!img_report.is_windows_img)
 			VhdUnmountImage();
 		return FALSE;
@@ -699,7 +699,7 @@ BOOL SetupWinToGo(DWORD DriveIndex, const char* drive_name, BOOL use_esp)
 		// Need to have the ESP mounted to invoke bcdboot
 		ms_efi = AltMountVolume(DriveIndex, SelectedDrive.Partition[partition_index[PI_ESP]].Offset, FALSE);
 		if (ms_efi == NULL) {
-			FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | APPERR(ERROR_CANT_ASSIGN_LETTER);
+			ErrorStatus = RUFUS_ERROR(APPERR(ERROR_CANT_ASSIGN_LETTER));
 			return FALSE;
 		}
 	}
@@ -719,7 +719,7 @@ BOOL SetupWinToGo(DWORD DriveIndex, const char* drive_name, BOOL use_esp)
 	if (RunCommand(cmd, sysnative_dir, usb_debug) != 0) {
 		// Try to continue... but report a failure
 		uprintf("Failed to enable boot");
-		FormatStatus = ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | APPERR(ERROR_ISO_EXTRACT);
+		ErrorStatus = RUFUS_ERROR(APPERR(ERROR_ISO_EXTRACT));
 	}
 
 	CopySKUSiPolicy((use_esp) ? ms_efi : drive_name);
@@ -808,6 +808,10 @@ BOOL ApplyWindowsCustomization(char drive_letter, int flags)
 				CloseHandle(CreateFileU(appraiserres_dll_src, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
 					NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL));
 				uprintf("Created '%s' placeholder", appraiserres_dll_src);
+				if (validate_md5sum) {
+					md5sum_totalbytes -= _filesizeU(appraiserres_dll_dst);
+					StrArrayAdd(&modified_files, appraiserres_dll_src, TRUE);
+				}
 			}
 		}
 
@@ -815,6 +819,8 @@ BOOL ApplyWindowsCustomization(char drive_letter, int flags)
 		// We only need to mount boot.wim if we have windowsPE data to deal with. If
 		// not, we can just copy our unattend.xml in \sources\$OEM$\$$\Panther\.
 		if (flags & UNATTEND_WINPE_SETUP_MASK) {
+			if (validate_md5sum)
+				md5sum_totalbytes -= _filesizeU(boot_wim_path);
 			uprintf("Mounting '%s[%d]'...", boot_wim_path, wim_index);
 			// Some "unofficial" ISOs have a modified boot.wim that doesn't have Windows Setup at index 2...
 			if (!WimIsValidIndex(boot_wim_path, wim_index)) {
@@ -929,6 +935,10 @@ out:
 	if (mount_path) {
 		uprintf("Unmounting '%s[%d]'...", boot_wim_path, wim_index);
 		WimUnmountImage(boot_wim_path, wim_index, TRUE);
+		if (validate_md5sum) {
+			md5sum_totalbytes += _filesizeU(boot_wim_path);
+			StrArrayAdd(&modified_files, boot_wim_path, TRUE);
+		}
 		UpdateProgressWithInfo(OP_PATCH, MSG_325, PATCH_PROGRESS_TOTAL, PATCH_PROGRESS_TOTAL);
 	}
 	free(mount_path);

@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * Extract icon from executable and set autorun.inf
- * Copyright © 2012-2021 Pete Batard <pete@akeo.ie>
+ * Copyright © 2012-2024 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -95,12 +95,15 @@ BOOL ExtractAppIcon(const char* path, BOOL bSilent)
 	HRSRC res;
 	WORD i;
 	BYTE* res_data;
-	DWORD res_size, Size, offset;
+	DWORD res_size, offset;
 	HANDLE hFile = INVALID_HANDLE_VALUE;
 	BOOL r = FALSE;
 	GRPICONDIR* icondir;
 
 	icondir = (GRPICONDIR*)GetResource(hMainInstance, MAKEINTRESOURCEA(IDI_ICON), _RT_GROUP_ICON, "icon", &res_size, FALSE);
+	assert(icondir != NULL && icondir->idCount <= 64);
+	if (icondir == NULL || icondir->idCount > 64)
+		goto out;
 
 	hFile = CreateFileU(path, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ,
 			NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -110,34 +113,34 @@ BOOL ExtractAppIcon(const char* path, BOOL bSilent)
 	}
 
 	// Write .ico header
-	if (!WriteFileWithRetry(hFile, icondir, 3*sizeof(WORD), &Size, WRITE_RETRIES)) {
+	if (!WriteFileWithRetry(hFile, icondir, 3 * sizeof(WORD), NULL, WRITE_RETRIES)) {
 		uprintf("Could not write icon header: %s.", WindowsErrorString());
 		goto out;
 	}
 
 	// Write icon data
-	offset = 3*sizeof(WORD) + icondir->idCount*sizeof(ICONDIRENTRY);
-	for (i=0; i<icondir->idCount; i++) {
+	offset = 3 * sizeof(WORD) + icondir->idCount * sizeof(ICONDIRENTRY);
+	for (i = 0; i < icondir->idCount; i++) {
 		// Write the common part of ICONDIRENTRY
-		if (!WriteFileWithRetry(hFile, &icondir->idEntries[i], sizeof(GRPICONDIRENTRY)-sizeof(WORD), &Size, WRITE_RETRIES)) {
+		if (!WriteFileWithRetry(hFile, &icondir->idEntries[i], sizeof(GRPICONDIRENTRY)-sizeof(WORD), NULL, WRITE_RETRIES)) {
 			uprintf("Could not write ICONDIRENTRY[%d]: %s.", i, WindowsErrorString());
 			goto out;
 		}
 		res = FindResourceA(hMainInstance, MAKEINTRESOURCEA(icondir->idEntries[i].nID), _RT_ICON);
 		// Write the DWORD offset
-		if (!WriteFileWithRetry(hFile, &offset, sizeof(offset), &Size, WRITE_RETRIES)) {
+		if (!WriteFileWithRetry(hFile, &offset, sizeof(offset), NULL, WRITE_RETRIES)) {
 			uprintf("Could not write ICONDIRENTRY[%d] offset: %s.", i, WindowsErrorString());
 			goto out;
 		}
 		offset += SizeofResource(NULL, res);
 	}
-	for (i=0; i<icondir->idCount; i++) {
+	for (i = 0; i < icondir->idCount; i++) {
 		// Write icon data
 		res = FindResourceA(hMainInstance, MAKEINTRESOURCEA(icondir->idEntries[i].nID), _RT_ICON);
 		res_handle = LoadResource(NULL, res);
 		res_data = (BYTE*)LockResource(res_handle);
 		res_size = SizeofResource(NULL, res);
-		if (!WriteFileWithRetry(hFile, res_data, res_size, &Size, WRITE_RETRIES)) {
+		if (!WriteFileWithRetry(hFile, res_data, res_size, NULL, WRITE_RETRIES)) {
 			uprintf("Could not write icon data #%d: %s.", i, WindowsErrorString());
 			goto out;
 		}

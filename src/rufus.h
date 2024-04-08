@@ -140,7 +140,7 @@
 #define PERCENTAGE(percent, value)  ((1ULL * (percent) * (value)) / 100ULL)
 #define IsChecked(CheckBox_ID)      (IsDlgButtonChecked(hMainDialog, CheckBox_ID) == BST_CHECKED)
 #define MB_IS_RTL                   (right_to_left_mode?MB_RTLREADING|MB_RIGHT:0)
-#define CHECK_FOR_USER_CANCEL       if (IS_ERROR(FormatStatus) && (SCODE_CODE(FormatStatus) == ERROR_CANCELLED)) goto out
+#define CHECK_FOR_USER_CANCEL       if (IS_ERROR(ErrorStatus) && (SCODE_CODE(ErrorStatus) == ERROR_CANCELLED)) goto out
 // Bit masks used for the display of additional image options in the UI
 #define IMOP_WINTOGO                0x01
 #define IMOP_PERSISTENCE            0x02
@@ -311,14 +311,6 @@ enum image_option_type {
 	IMOP_MAX
 };
 
-enum hash_type {
-	HASH_MD5 = 0,
-	HASH_SHA1,
-	HASH_SHA256,
-	HASH_SHA512,
-	HASH_MAX
-};
-
 enum file_io_type {
 	FILE_IO_READ = 0,
 	FILE_IO_WRITE,
@@ -484,6 +476,51 @@ typedef struct {
 	uint32_t* address;	// 32-bit will do, as we're not dealing with >4GB DLLs...
 } dll_resolver_t;
 
+/* Alignment macro */
+#if defined(__GNUC__)
+#define ALIGNED(m) __attribute__ ((__aligned__(m)))
+#elif defined(_MSC_VER)
+#define ALIGNED(m) __declspec(align(m))
+#endif
+
+/* Hash definitions */
+enum hash_type {
+	HASH_MD5 = 0,
+	HASH_SHA1,
+	HASH_SHA256,
+	HASH_SHA512,
+	HASH_MAX
+};
+
+/* Blocksize for each hash algorithm - Must be a power of 2 */
+#define MD5_BLOCKSIZE       64
+#define SHA1_BLOCKSIZE      64
+#define SHA256_BLOCKSIZE    64
+#define SHA512_BLOCKSIZE    128
+#define MAX_BLOCKSIZE       SHA512_BLOCKSIZE
+
+/* Hashsize for each hash algorithm */
+#define MD5_HASHSIZE        16
+#define SHA1_HASHSIZE       20
+#define SHA256_HASHSIZE     32
+#define SHA512_HASHSIZE     64
+#define MAX_HASHSIZE        SHA512_HASHSIZE
+
+/* Context for the hash algorithms */
+typedef struct ALIGNED(64) {
+	uint8_t buf[MAX_BLOCKSIZE];
+	uint64_t state[8];
+	uint64_t bytecount;
+} HASH_CONTEXT;
+
+/* Hash functions */
+typedef void hash_init_t(HASH_CONTEXT* ctx);
+typedef void hash_write_t(HASH_CONTEXT* ctx, const uint8_t* buf, size_t len);
+typedef void hash_final_t(HASH_CONTEXT* ctx);
+extern hash_init_t* hash_init[HASH_MAX];
+extern hash_write_t* hash_write[HASH_MAX];
+extern hash_final_t* hash_final[HASH_MAX];
+
 #ifndef __VA_GROUP__
 #define __VA_GROUP__(...)  __VA_ARGS__
 #endif
@@ -588,6 +625,35 @@ typedef struct {
 #define UNATTEND_OFFLINE_SERVICING_MASK     (UNATTEND_OFFLINE_INTERNAL_DRIVES | UNATTEND_FORCE_S_MODE)
 #define UNATTEND_DEFAULT_SELECTION_MASK     (UNATTEND_SECUREBOOT_TPM_MINRAM | UNATTEND_NO_ONLINE_ACCOUNT | UNATTEND_OFFLINE_INTERNAL_DRIVES)
 
+/* Hash tables */
+typedef struct htab_entry {
+	uint32_t used;
+	char* str;
+	void* data;
+} htab_entry;
+typedef struct htab_table {
+	htab_entry* table;
+	uint32_t size;
+	uint32_t filled;
+} htab_table;
+#define HTAB_EMPTY {NULL, 0, 0}
+extern BOOL htab_create(uint32_t nel, htab_table* htab);
+extern void htab_destroy(htab_table* htab);
+extern uint32_t htab_hash(char* str, htab_table* htab);
+
+/* Basic String Array */
+typedef struct {
+	char** String;
+	uint32_t Index;		// Current array size
+	uint32_t Max;		// Maximum array size
+} StrArray;
+extern void StrArrayCreate(StrArray* arr, uint32_t initial_size);
+extern int32_t StrArrayAdd(StrArray* arr, const char* str, BOOL);
+extern int32_t StrArrayFind(StrArray* arr, const char* str);
+extern void StrArrayClear(StrArray* arr);
+extern void StrArrayDestroy(StrArray* arr);
+#define IsStrArrayEmpty(arr) (arr.Index == 0)
+
 /*
  * Globals
  */
@@ -596,9 +662,9 @@ extern RUFUS_IMG_REPORT img_report;
 extern HINSTANCE hMainInstance;
 extern HWND hMainDialog, hLogDialog, hStatus, hDeviceList, hCapacity, hImageOption;
 extern HWND hPartitionScheme, hTargetSystem, hFileSystem, hClusterSize, hLabel, hBootType;
-extern HWND hNBPasses, hLog, hInfo, hProgress, hDiskID;
+extern HWND hNBPasses, hLog, hInfo, hProgress;
 extern WORD selected_langid;
-extern DWORD FormatStatus, DownloadStatus, MainThreadId, LastWriteError;
+extern DWORD ErrorStatus, DownloadStatus, MainThreadId, LastWriteError;
 extern BOOL use_own_c32[NB_OLD_C32], detect_fakes, op_in_progress, right_to_left_mode;
 extern BOOL allow_dual_uefi_bios, large_drive, usb_debug;
 extern uint8_t image_options, *pe256ssp;
@@ -663,6 +729,7 @@ extern BOOL ExtractDOS(const char* path);
 extern BOOL ExtractISO(const char* src_iso, const char* dest_dir, BOOL scan);
 extern BOOL ExtractZip(const char* src_zip, const char* dest_dir);
 extern int64_t ExtractISOFile(const char* iso, const char* iso_file, const char* dest_file, DWORD attributes);
+extern uint32_t ReadISOFileToBuffer(const char* iso, const char* iso_file, uint8_t** buf);
 extern BOOL CopySKUSiPolicy(const char* drive_name);
 extern BOOL HasEfiImgBootLoaders(void);
 extern BOOL DumpFatDir(const char* path, int32_t cluster);
@@ -671,7 +738,7 @@ extern uint16_t GetSyslinuxVersion(char* buf, size_t buf_size, char** ext);
 extern BOOL SetAutorun(const char* path);
 extern char* FileDialog(BOOL save, char* path, const ext_t* ext, UINT* selected_ext);
 extern BOOL FileIO(enum file_io_type io_type, char* path, char** buffer, DWORD* size);
-extern unsigned char* GetResource(HMODULE module, char* name, char* type, const char* desc, DWORD* len, BOOL duplicate);
+extern uint8_t* GetResource(HMODULE module, char* name, char* type, const char* desc, DWORD* len, BOOL duplicate);
 extern DWORD GetResourceSize(HMODULE module, char* name, char* type, const char* desc);
 extern DWORD RunCommandWithProgress(const char* cmdline, const char* dir, BOOL log, int msg);
 #define RunCommand(cmd, dir, log) RunCommandWithProgress(cmd, dir, log, 0)
@@ -721,6 +788,7 @@ extern HANDLE CreateFileWithTimeout(LPCSTR lpFileName, DWORD dwDesiredAccess, DW
 extern BOOL SetThreadAffinity(DWORD_PTR* thread_affinity, size_t num_threads);
 extern BOOL HashFile(const unsigned type, const char* path, uint8_t* sum);
 extern BOOL PE256File(const char* path, uint8_t* hash);
+extern void UpdateMD5Sum(const char* dest_dir, const char* md5sum_name);
 extern BOOL HashBuffer(const unsigned type, const uint8_t* buf, const size_t len, uint8_t* sum);
 extern BOOL IsFileInDB(const char* path);
 extern int IsBootloaderRevoked(const char* path);
@@ -749,35 +817,6 @@ extern uint32_t ResolveDllAddress(dll_resolver_t* resolver);
 #define GetTextWidth(hDlg, id) GetTextSize(GetDlgItem(hDlg, id), NULL).cx
 
 DWORD WINAPI HashThread(void* param);
-
-/* Hash tables */
-typedef struct htab_entry {
-	uint32_t used;
-	char* str;
-	void* data;
-} htab_entry;
-typedef struct htab_table {
-	htab_entry *table;
-	uint32_t size;
-	uint32_t filled;
-} htab_table;
-#define HTAB_EMPTY {NULL, 0, 0}
-extern BOOL htab_create(uint32_t nel, htab_table* htab);
-extern void htab_destroy(htab_table* htab);
-extern uint32_t htab_hash(char* str, htab_table* htab);
-
-/* Basic String Array */
-typedef struct {
-	char**   String;
-	uint32_t Index;		// Current array size
-	uint32_t Max;		// Maximum array size
-} StrArray;
-extern void StrArrayCreate(StrArray* arr, uint32_t initial_size);
-extern int32_t StrArrayAdd(StrArray* arr, const char* str, BOOL );
-extern int32_t StrArrayFind(StrArray* arr, const char* str);
-extern void StrArrayClear(StrArray* arr);
-extern void StrArrayDestroy(StrArray* arr);
-#define IsStrArrayEmpty(arr) (arr.Index == 0)
 
 /*
  * typedefs for the function prototypes. Use the something like:
@@ -863,3 +902,5 @@ out:
 #define ERROR_CANT_MOUNT_VOLUME        0x120C
 #define ERROR_BAD_SIGNATURE            0x120D
 #define ERROR_CANT_DOWNLOAD            0x120E
+
+#define RUFUS_ERROR(err)               (ERROR_SEVERITY_ERROR | FAC(FACILITY_STORAGE) | (err))
