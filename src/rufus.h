@@ -31,6 +31,12 @@
 
 #pragma once
 
+/* Convenient to have around */
+#define KB                          1024LL
+#define MB                          1048576LL
+#define GB                          1073741824LL
+#define TB                          1099511627776LL
+
 /*
  * Features not ready for prime time and that may *DESTROY* your data - USE AT YOUR OWN RISKS!
  */
@@ -62,9 +68,9 @@
 #define DRIVE_ACCESS_RETRIES        150			// How many times we should retry
 #define DRIVE_INDEX_MIN             0x00000080
 #define DRIVE_INDEX_MAX             0x000000C0
-#define MIN_DRIVE_SIZE              8			// Minimum size a drive must have, to be formattable (in MB)
-#define MIN_EXTRA_PART_SIZE         (1024*1024)	// Minimum size of the extra partition, in bytes
-#define MIN_EXT_SIZE                (256*1024*1024)	// Minimum size we allow for ext formatting
+#define MIN_DRIVE_SIZE              (8 * MB)	// Minimum size a drive must have, to be formattable
+#define MIN_EXTRA_PART_SIZE         (1 * MB)	// Minimum size of the extra partition, in bytes
+#define MIN_EXT_SIZE                (256 * MB)	// Minimum size we allow for ext formatting
 #define MAX_DRIVES                  (DRIVE_INDEX_MAX - DRIVE_INDEX_MIN)
 #define MAX_TOOLTIPS                128
 #define MAX_SIZE_SUFFIXES           6			// bytes, KB, MB, GB, TB, PB
@@ -78,8 +84,8 @@
 #define MAX_PARTITIONS              16			// Maximum number of partitions we handle
 #define MAX_ESP_TOGGLE              8			// Maximum number of entries we record to toggle GPT ESP back and forth
 #define MAX_IGNORE_USB              8			// Maximum number of USB drives we want to ignore
-#define MAX_ISO_TO_ESP_SIZE         1024		// Maximum size we allow for the ISO → ESP option (in MB)
-#define MAX_DEFAULT_LIST_CARD_SIZE  200			// Size above which we don't list a card without enable HDD or Alt-F (in GB)
+#define MAX_ISO_TO_ESP_SIZE         (1 * GB)	// Maximum size we allow for the ISO → ESP option
+#define MAX_DEFAULT_LIST_CARD_SIZE  (500 * GB)	// Size above which we don't list a card without enable HDD or Alt-F
 #define MAX_SECTORS_TO_CLEAR        128			// nb sectors to zap when clearing the MBR/GPT (must be >34)
 #define MAX_USERNAME_LENGTH         128			// Maximum size we'll accept for a WUE specified username
 #define MAX_WININST                 4			// Max number of install[.wim|.esd] we can handle on an image
@@ -100,13 +106,13 @@
 #define BADBLOCK_PATTERN_SLC        {0x00, 0xff, 0x55, 0xaa}
 #define BADCLOCK_PATTERN_MLC        {0x00, 0xff, 0x33, 0xcc}
 #define BADBLOCK_PATTERN_TLC        {0x00, 0xff, 0x1c71c7, 0xe38e38}
-#define BADBLOCK_BLOCK_SIZE         (512 * 1024)
-#define LARGE_FAT32_SIZE            (32 * 1073741824LL)	// Size at which we need to use fat32format
+#define BADBLOCK_BLOCK_SIZE         (512 * KB)
+#define LARGE_FAT32_SIZE            (32 * GB)	// Size at which we need to use fat32format
 #define UDF_FORMAT_SPEED            3.1f		// Speed estimate at which we expect UDF drives to be formatted (GB/s)
 #define UDF_FORMAT_WARN             20			// Duration (in seconds) above which we warn about long UDF formatting times
-#define MAX_FAT32_SIZE              2.0f		// Threshold above which we disable FAT32 formatting (in TB)
+#define MAX_FAT32_SIZE              (2 * TB)	// Threshold above which we disable FAT32 formatting
 #define FAT32_CLUSTER_THRESHOLD     1.011f		// For FAT32, cluster size changes don't occur at power of 2 boundaries but slightly above
-#define DD_BUFFER_SIZE              (32 * 1024 * 1024)	// Minimum size of buffer to use for DD operations
+#define DD_BUFFER_SIZE              (32 * MB)	// Minimum size of buffer to use for DD operations
 #define UBUFFER_SIZE                4096
 #define ISO_BUFFER_SIZE             (64 * KB)	// Buffer size used for ISO data extraction
 #define RSA_SIGNATURE_SIZE          256
@@ -147,27 +153,29 @@
 
 #define ComboBox_GetCurItemData(hCtrl) ComboBox_GetItemData(hCtrl, ComboBox_GetCurSel(hCtrl))
 
-#define safe_free(p) do {free((void*)p); p = NULL;} while(0)
-#define safe_mm_free(p) do {_mm_free((void*)p); p = NULL;} while(0)
-#define safe_min(a, b) min((size_t)(a), (size_t)(b))
-#define safe_strcp(dst, dst_max, src, count) do { size_t _count = (count); memmove(dst, src, safe_min(_count, dst_max)); \
-	((char*)(dst))[safe_min(_count, dst_max)-1] = 0; } while(0)
-#define safe_strcpy(dst, dst_max, src) safe_strcp(dst, dst_max, src, safe_strlen(src)+1)
+#define safe_free(p) do { free((void*)p); p = NULL; } while(0)
+#define safe_mm_free(p) do { _mm_free((void*)p); p = NULL; } while(0)
+static __inline void safe_strcp(char* dst, const size_t dst_max, const char* src, const size_t count) {
+	memmove(dst, src, min(count, dst_max));
+	dst[min(count, dst_max) - 1] = 0;
+}
+#define safe_strcpy(dst, dst_max, src) safe_strcp(dst, dst_max, src, safe_strlen(src) + 1)
 #define static_strcpy(dst, src) safe_strcpy(dst, sizeof(dst), src)
 #define safe_strcat(dst, dst_max, src) strncat_s(dst, dst_max, src, _TRUNCATE)
 #define static_strcat(dst, src) safe_strcat(dst, sizeof(dst), src)
-#define safe_strcmp(str1, str2) strcmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2))
-#define safe_strstr(str1, str2) strstr(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2))
-#define safe_stricmp(str1, str2) _stricmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2))
-#define safe_strncmp(str1, str2, count) strncmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2), count)
-#define safe_strnicmp(str1, str2, count) _strnicmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2), count)
-#define safe_closehandle(h) do {if ((h != INVALID_HANDLE_VALUE) && (h != NULL)) {CloseHandle(h); h = INVALID_HANDLE_VALUE;}} while(0)
-#define safe_release_dc(hDlg, hDC) do {if ((hDC != INVALID_HANDLE_VALUE) && (hDC != NULL)) {ReleaseDC(hDlg, hDC); hDC = NULL;}} while(0)
-#define safe_sprintf(dst, count, ...) do { size_t _count = (count); _snprintf_s(dst, _count, _TRUNCATE, __VA_ARGS__); (dst)[(_count)-1] = 0; } while(0)
+#define safe_strcmp(str1, str2) strcmp(((str1 == NULL) ? "<NULL>" : str1), ((str2 == NULL) ? "<NULL>" : str2))
+#define safe_strstr(str1, str2) strstr(((str1 == NULL) ? "<NULL>" : str1), ((str2 == NULL) ? "<NULL>" : str2))
+#define safe_stricmp(str1, str2) _stricmp(((str1 == NULL) ? "<NULL>" : str1), ((str2 == NULL) ? "<NULL>" : str2))
+#define safe_strncmp(str1, str2, count) strncmp(((str1 == NULL) ? "<NULL>" : str1), ((str2 == NULL) ? "<NULL>" : str2), count)
+#define safe_strnicmp(str1, str2, count) _strnicmp(((str1 == NULL) ? "<NULL>" : str1), ((str2 == NULL) ? "<NULL>" : str2), count)
+#define safe_closehandle(h) do { if ((h != INVALID_HANDLE_VALUE) && (h != NULL)) { CloseHandle(h); h = INVALID_HANDLE_VALUE; } } while(0)
+#define safe_release_dc(hDlg, hDC) do { if ((hDC != INVALID_HANDLE_VALUE) && (hDC != NULL)) { ReleaseDC(hDlg, hDC); hDC = NULL; } } while(0)
+#define safe_sprintf(dst, count, ...) do { size_t _count = count; char* _dst = dst; _snprintf_s(_dst, _count, _TRUNCATE, __VA_ARGS__); \
+	_dst[(_count) - 1] = 0; } while(0)
 #define static_sprintf(dst, ...) safe_sprintf(dst, sizeof(dst), __VA_ARGS__)
-#define safe_atoi(str) ((((char*)(str))==NULL)?0:atoi(str))
-#define safe_strlen(str) ((((char*)(str))==NULL)?0:strlen(str))
-#define safe_strdup(str) ((((char*)(str))==NULL)?NULL:_strdup(str))
+#define safe_atoi(str) ((((char*)(str))==NULL) ? 0 : atoi(str))
+#define safe_strlen(str) ((((char*)(str))==NULL) ? 0 : strlen(str))
+#define safe_strdup(str) ((((char*)(str))==NULL) ? NULL : _strdup(str))
 #if defined(_MSC_VER)
 #define safe_vsnprintf(buf, size, format, arg) _vsnprintf_s(buf, size, _TRUNCATE, format, arg)
 #else
