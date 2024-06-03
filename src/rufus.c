@@ -2575,9 +2575,6 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 			rc.left += cbw / 2;
 			ShowLanguageMenu(rc);
 			break;
-		case IDC_SETTINGS:
-			MyDialogBox(hMainInstance, IDD_UPDATE_POLICY, hDlg, UpdateCallback);
-			break;
 		case IDC_HASH:
 			// TODO: Move this as a fn call in hash.c?
 			if ((format_thread == NULL) && (image_path != NULL)) {
@@ -2704,11 +2701,7 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 		fScale = GetDeviceCaps(hDC, LOGPIXELSX) / 96.0f;
 		safe_release_dc(hDlg, hDC);
 		apply_localization(IDD_DIALOG, hDlg);
-		// The AppStore version always enables Fido
-		if (appstore_version)
-			SetFidoCheck();
-		else
-			SetUpdateCheck();
+	    SetFidoCheck();
 		first_log_display = TRUE;
 		log_displayed = FALSE;
 		hLogDialog = MyCreateDialog(hMainInstance, IDD_LOG, hDlg, (DLGPROC)LogCallback);
@@ -2716,9 +2709,6 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 		GetDevices(0);
 		EnableControls(TRUE, FALSE);
 		UpdateImage(FALSE);
-		// The AppStore version does not need the internal check for updates
-		if (!appstore_version)
-			CheckForUpdates(FALSE);
 		// Register MEDIA_INSERTED/MEDIA_REMOVED notifications for card readers
 		if (SUCCEEDED(SHGetSpecialFolderLocation(0, CSIDL_DESKTOP, &pidlDesktop))) {
 			NotifyEntry.pidl = pidlDesktop;
@@ -2797,10 +2787,6 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 			switch (lpttt->hdr.idFrom) {
 			case IDC_ABOUT:
 				utf8_to_wchar_no_alloc(lmprintf(MSG_302), wtooltip, ARRAYSIZE(wtooltip));
-				lpttt->lpszText = wtooltip;
-				break;
-			case IDC_SETTINGS:
-				utf8_to_wchar_no_alloc(lmprintf(MSG_301), wtooltip, ARRAYSIZE(wtooltip));
 				lpttt->lpszText = wtooltip;
 				break;
 			case IDC_LANG:
@@ -2917,12 +2903,6 @@ static INT_PTR CALLBACK MainCallback(HWND hDlg, UINT message, WPARAM wParam, LPA
 		}
 		SendMessage(hProgress, PBM_SETSTATE, (WPARAM)tb_state, 0);
 		SetTaskbarProgressState(tb_flags);
-		break;
-
-	case UM_NO_UPDATE:
-		Notification(MSG_INFO, NULL, NULL, lmprintf(MSG_243), lmprintf(MSG_247));
-		// Need to manually set focus back to "Check Now" for tabbing to work
-		SendMessage(hUpdatesDlg, WM_NEXTDLGCTL, (WPARAM)GetDlgItem(hUpdatesDlg, IDC_CHECK_NOW), TRUE);
 		break;
 
 	case UM_FORMAT_START:
@@ -3468,7 +3448,7 @@ skip_args_processing:
 		uprintf("AppStore version detected");
 
 	// Look for a .ini file in the current app directory
-	static_sprintf(ini_path, "%srufus.ini", app_dir);
+	static_sprintf(ini_path, "%srufus-7.ini", app_dir);
 	fd = fopenU(ini_path, ini_flags);	// Will create the file if portable mode is requested
 	// Using the string directly in safe_strcmp() would call GetSignatureName() twice
 	tmp = GetSignatureName(NULL, NULL, FALSE);
@@ -3966,14 +3946,6 @@ extern int TestHashes(void);
 			if ((msg.message == WM_SYSKEYDOWN) && (msg.wParam == 'X')) {
 				PrintStatus(2000, MSG_255);
 				existing_key = FALSE;
-				continue;
-			}
-			// Alt Y => Force the update check to be successful
-			// This will set the reported current version of Rufus to 0.0.0.0 when performing an update
-			// check, so that it always succeeds. This is useful for translators.
-			if ((msg.message == WM_SYSKEYDOWN) && (msg.wParam == 'Y')) {
-				force_update = (force_update > 0) ? 0 : 1;
-				PrintStatusTimeout(lmprintf(MSG_259), force_update);
 				continue;
 			}
 			// Alt-Z => Zero the drive

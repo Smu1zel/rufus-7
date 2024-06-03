@@ -47,10 +47,7 @@ extern char* ini_file;
 #define SETTING_EXPERT_MODE                 "ExpertMode"
 #define SETTING_FORCE_LARGE_FAT32_FORMAT    "ForceLargeFat32Formatting"
 #define SETTING_IGNORE_BOOT_MARKER          "IgnoreBootMarker"
-#define SETTING_INCLUDE_BETAS               "CheckForBetas"
-#define SETTING_LAST_UPDATE                 "LastUpdateCheck"
 #define SETTING_LOCALE                      "Locale"
-#define SETTING_UPDATE_INTERVAL             "UpdateCheckInterval"
 #define SETTING_USE_EXT_VERSION             "UseExtVersion"
 #define SETTING_USE_PROPER_SIZE_UNITS       "UseProperSizeUnits"
 #define SETTING_USE_UDF_VERSION             "UseUdfVersion"
@@ -58,7 +55,6 @@ extern char* ini_file;
 #define SETTING_PERSISTENT_LOG              "PersistentLog"
 #define SETTING_PREFERRED_SAVE_IMAGE_TYPE   "PreferredSaveImageType"
 #define SETTING_PRESERVE_TIMESTAMPS         "PreserveTimestamps"
-#define SETTING_VERBOSE_UPDATES             "VerboseUpdateCheck"
 #define SETTING_WUE_OPTIONS                 "WindowsUserExperienceOptions"
 
 

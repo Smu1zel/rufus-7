@@ -386,7 +386,7 @@ INT_PTR CALLBACK AboutCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		ResizeButtonHeight(hDlg, IDOK);
 		static_sprintf(about_blurb, about_blurb_format, lmprintf(MSG_174|MSG_RTF),
 			lmprintf(MSG_175|MSG_RTF, rufus_version[0], rufus_version[1], rufus_version[2]),
-			"Copyright © 2011-2024 Pete Batard",
+			"Fork made by Smu1zel. Original software is Copyright © 2011-2024 Pete Batard",
 			lmprintf(MSG_176|MSG_RTF), lmprintf(MSG_177|MSG_RTF), lmprintf(MSG_178|MSG_RTF));
 		for (i = 0; i < ARRAYSIZE(hEdit); i++) {
 			hEdit[i] = GetDlgItem(hDlg, edit_id[i]);
@@ -1254,114 +1254,6 @@ static void PositionControls(HWND hDlg)
 	hPrevCtrl = GetNextWindow(hCtrl, GW_HWNDPREV);
 	SetWindowPos(hCtrl, hPrevCtrl, rc.left, rc.top, rc.right - rc.left, ddbh, 0);
 }
-
-/*
- * Update policy and settings dialog callback
- */
-INT_PTR CALLBACK UpdateCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	int i, dy;
-	RECT rect;
-	REQRESIZE* rsz;
-	HWND hPolicy;
-	static HWND hFrequency, hBeta;
-	int32_t freq;
-	char update_policy_text[4096];
-	static BOOL resized_already = TRUE;
-
-	switch (message) {
-	case WM_INITDIALOG:
-		resized_already = FALSE;
-		hUpdatesDlg = hDlg;
-		apply_localization(IDD_UPDATE_POLICY, hDlg);
-		PositionControls(hDlg);
-		SetTitleBarIcon(hDlg);
-		CenterDialog(hDlg, NULL);
-		hFrequency = GetDlgItem(hDlg, IDC_UPDATE_FREQUENCY);
-		hBeta = GetDlgItem(hDlg, IDC_INCLUDE_BETAS);
-		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, lmprintf(MSG_013)), -1));
-		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, lmprintf(MSG_030, lmprintf(MSG_014))), 86400));
-		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, lmprintf(MSG_015)), 604800));
-		IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, lmprintf(MSG_016)), 2629800));
-		freq = ReadSetting32(SETTING_UPDATE_INTERVAL);
-		EnableWindow(GetDlgItem(hDlg, IDC_CHECK_NOW), (freq != 0));
-		EnableWindow(hBeta, (freq >= 0) && is_x86_64);
-		switch(freq) {
-		case -1:
-			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 0));
-			break;
-		case 0:
-		case 86400:
-			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 1));
-			break;
-		case 604800:
-			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 2));
-			break;
-		case 2629800:
-			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 3));
-			break;
-		default:
-			IGNORE_RETVAL(ComboBox_SetItemData(hFrequency, ComboBox_AddStringU(hFrequency, lmprintf(MSG_017)), freq));
-			IGNORE_RETVAL(ComboBox_SetCurSel(hFrequency, 4));
-			break;
-		}
-		IGNORE_RETVAL(ComboBox_AddStringU(hBeta, lmprintf(MSG_008)));
-		IGNORE_RETVAL(ComboBox_AddStringU(hBeta, lmprintf(MSG_009)));
-		IGNORE_RETVAL(ComboBox_SetCurSel(hBeta, (ReadSettingBool(SETTING_INCLUDE_BETAS) && is_x86_64) ? 0 : 1));
-		hPolicy = GetDlgItem(hDlg, IDC_POLICY);
-		SendMessage(hPolicy, EM_AUTOURLDETECT, 1, 0);
-		static_sprintf(update_policy_text, update_policy, lmprintf(MSG_179|MSG_RTF),
-			lmprintf(MSG_180|MSG_RTF), lmprintf(MSG_181|MSG_RTF), lmprintf(MSG_182|MSG_RTF), lmprintf(MSG_183|MSG_RTF),
-			lmprintf(MSG_184|MSG_RTF), lmprintf(MSG_185|MSG_RTF), lmprintf(MSG_186|MSG_RTF));
-		SendMessageA(hPolicy, EM_SETTEXTEX, (WPARAM)&friggin_microsoft_unicode_amateurs, (LPARAM)update_policy_text);
-		SendMessage(hPolicy, EM_SETSEL, -1, -1);
-		SendMessage(hPolicy, EM_SETEVENTMASK, 0, ENM_LINK|ENM_REQUESTRESIZE);
-		SendMessageA(hPolicy, EM_SETBKGNDCOLOR, 0, (LPARAM)GetSysColor(COLOR_BTNFACE));
-		SendMessage(hPolicy, EM_REQUESTRESIZE, 0, 0);
-		break;
-	case WM_NOTIFY:
-		if ((((LPNMHDR)lParam)->code == EN_REQUESTRESIZE) && (!resized_already)) {
-			resized_already = TRUE;
-			hPolicy = GetDlgItem(hDlg, IDC_POLICY);
-			GetWindowRect(hPolicy, &rect);
-			dy = rect.bottom - rect.top;
-			rsz = (REQRESIZE *)lParam;
-			dy -= rsz->rc.bottom - rsz->rc.top + 6;	// add the border
-			ResizeMoveCtrl(hDlg, hDlg, 0, 0, 0, -dy, 1.0f);
-			ResizeMoveCtrl(hDlg, hPolicy, 0, 0, 0, -dy, 1.0f);
-			for (i = 2; i < ARRAYSIZE(update_settings_reposition_ids); i++)
-				ResizeMoveCtrl(hDlg, GetDlgItem(hDlg, update_settings_reposition_ids[i]), 0, -dy, 0, 0, 1.0f);
-		}
-		break;
-	case WM_COMMAND:
-		switch (LOWORD(wParam)) {
-		case IDCLOSE:
-		case IDCANCEL:
-			reset_localization(IDD_UPDATE_POLICY);
-			EndDialog(hDlg, LOWORD(wParam));
-			hUpdatesDlg = NULL;
-			return (INT_PTR)TRUE;
-		case IDC_CHECK_NOW:
-			CheckForUpdates(TRUE);
-			return (INT_PTR)TRUE;
-		case IDC_UPDATE_FREQUENCY:
-			if (HIWORD(wParam) != CBN_SELCHANGE)
-				break;
-			freq = (int32_t)ComboBox_GetCurItemData(hFrequency);
-			WriteSetting32(SETTING_UPDATE_INTERVAL, (DWORD)freq);
-			EnableWindow(hBeta, (freq >= 0) && is_x86_64);
-			return (INT_PTR)TRUE;
-		case IDC_INCLUDE_BETAS:
-			if (HIWORD(wParam) != CBN_SELCHANGE)
-				break;
-			WriteSettingBool(SETTING_INCLUDE_BETAS, ComboBox_GetCurSel(hBeta) == 0);
-			return (INT_PTR)TRUE;
-		}
-		break;
-	}
-	return (INT_PTR)FALSE;
-}
-
 /*
  * Use a thread to enable the download button as this may be a lengthy
  * operation due to the external download check.
@@ -1424,64 +1316,8 @@ void SetFidoCheck(void)
 		return;
 	}
 
-	if (!appstore_version && (ReadSetting32(SETTING_UPDATE_INTERVAL) <= 0)) {
-		ubprintf("Notice: The ISO download feature has been deactivated because "
-			"'Check for updates' is disabled in your settings.");
-		return;
-	}
-
 	CreateThread(NULL, 0, CheckForFidoThread, NULL, 0, NULL);
 }
-
-/*
- * Initial update check setup
- */
-BOOL SetUpdateCheck(void)
-{
-	BOOL enable_updates;
-	uint64_t commcheck = GetTickCount64();
-	char filename[MAX_PATH] = "", exename[] = APPLICATION_NAME ".exe";
-	size_t fn_len, exe_len;
-
-	// Test if we can read and write settings. If not, forget it.
-	WriteSetting64(SETTING_COMM_CHECK, commcheck);
-	if (ReadSetting64(SETTING_COMM_CHECK) != commcheck)
-		return FALSE;
-
-	// If the update interval is not set, this is the first time we run so prompt the user
-	if (ReadSetting32(SETTING_UPDATE_INTERVAL) == 0) {
-		notification_info more_info;
-
-		// Add a hack for people who'd prefer the app not to prompt about update settings on first run.
-		// If the executable is called "rufus.exe", without version, we disable the prompt
-		GetModuleFileNameU(NULL, filename, sizeof(filename));
-		fn_len = safe_strlen(filename);
-		exe_len = safe_strlen(exename);
-#if !defined(_DEBUG)	// Don't allow disabling update prompt, unless it's a release
-		if ((fn_len > exe_len) && (safe_stricmp(&filename[fn_len-exe_len], exename) == 0)) {
-			uprintf("Short name used - Disabling initial update policy prompt\n");
-			enable_updates = TRUE;
-		} else {
-#endif
-			more_info.id = IDD_UPDATE_POLICY;
-			more_info.callback = UpdateCallback;
-			enable_updates = Notification(MSG_QUESTION, NULL, &more_info, lmprintf(MSG_004), lmprintf(MSG_005));
-#if !defined(_DEBUG)
-		}
-#endif
-		if (!enable_updates) {
-			WriteSetting32(SETTING_UPDATE_INTERVAL, -1);
-			return FALSE;
-		}
-		// If the user hasn't set the interval in the dialog, set to default
-		if ( (ReadSetting32(SETTING_UPDATE_INTERVAL) == 0) ||
-			 (ReadSetting32(SETTING_UPDATE_INTERVAL) == -1) )
-			WriteSetting32(SETTING_UPDATE_INTERVAL, 86400);
-	}
-	SetFidoCheck();
-	return TRUE;
-}
-
 void CreateStaticFont(HDC hDC, HFONT* hFont, BOOL underlined)
 {
 	TEXTMETRIC tm;
