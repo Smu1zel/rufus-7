@@ -104,7 +104,7 @@ static BOOL GetUSBProperties(char* parent_path, char* device_id, usb_device_prop
 	}
 
 	// In their great wisdom, Microsoft decided to BREAK the USB speed report between Windows 7 and Windows 8
-	if (nWindowsVersion >= WINDOWS_8) {
+	if (WindowsVersion >= WINDOWS_8) {
 		size = sizeof(conn_info_v2);
 		memset(&conn_info_v2, 0, size);
 		conn_info_v2.ConnectionIndex = (ULONG)props->port;
