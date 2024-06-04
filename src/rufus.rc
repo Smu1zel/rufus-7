@@ -413,15 +413,14 @@ BEGIN
     BEGIN
         BLOCK "000004b0"
         BEGIN
-            VALUE "Comments", "https://rufus.ie"
-            VALUE "CompanyName", "Akeo Consulting"
-            VALUE "FileDescription", "Rufus"
+            VALUE "Comments", "https://github.com/Smu1zel/rufus-7"
+            VALUE "CompanyName", "Smu1zel"
+            VALUE "FileDescription", "Rufus 7"
             VALUE "FileVersion", "4.6.2182"
             VALUE "InternalName", "Rufus"
-            VALUE "LegalCopyright", "� 2011-2024 Pete Batard (GPL v3)"
             VALUE "LegalTrademarks", "https://www.gnu.org/licenses/gpl-3.0.html"
-            VALUE "OriginalFilename", "rufus-4.6.exe"
-            VALUE "ProductName", "Rufus"
+            VALUE "OriginalFilename", "rufus7-4.6.exe"
+            VALUE "ProductName", "Rufus 7"
             VALUE "ProductVersion", "4.6.2182"
         END
     END
