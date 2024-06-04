@@ -54,7 +54,7 @@
 #else
 #define APPLICATION_ARCH            "(Unknown Arch)"
 #endif
-#define COMPANY_NAME                "Akeo Consulting"
+#define COMPANY_NAME                "Smu1zel"
 #define STR_NO_LABEL                "NO_LABEL"
 // Yes, there exist characters between these seemingly empty quotes!
 #define LEFT_TO_RIGHT_MARK          "‎"
