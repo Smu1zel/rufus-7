@@ -4053,7 +4053,6 @@ out:
 	safe_free(update.download_url);
 	safe_free(update.release_notes);
 	safe_free(grub2_buf);
-	safe_free(fido_url);
 	safe_free(fido_script);
 	safe_free(pe256ssp);
 	if (argv != NULL) {

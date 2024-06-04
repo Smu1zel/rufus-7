@@ -1263,7 +1263,6 @@ static DWORD WINAPI CheckForFidoThread(LPVOID param)
 	static BOOL is_active = FALSE;
 	LONG_PTR style;
 	char* loc = NULL;
-	uint64_t len;
 	HWND hCtrl;
 
 	// Because a user may switch language before this thread has completed,
@@ -1273,17 +1272,9 @@ static DWORD WINAPI CheckForFidoThread(LPVOID param)
 		return -1;
 	is_active = TRUE;
 	safe_free(fido_url);
-
-	// Get the Fido URL from parsing a 'Fido.ver' on our server. This enables the use of different
-	// Fido versions from different versions of Rufus, if needed, as opposed to always downloading
-	// the latest release from GitHub, which may contain incompatible changes...
-	len = DownloadToFileOrBuffer(RUFUS_URL "/Fido.ver", NULL, (BYTE**)&loc, NULL, FALSE);
-	if ((len == 0) || (len >= 4 * KB))
-		goto out;
-
-	len++;	// DownloadToFileOrBuffer allocated an extra NUL character if needed
-	fido_url = get_token_data_buffer(FIDO_VERSION, 1, loc, (size_t)len);
-	if (safe_strncmp(fido_url, "https://github.com/pbatard/Fido", 31) != 0) {
+	// TODO: I should probably specify this somewhere rather than hardcode it here every update.
+	fido_url = "https://github.com/Smu1zel/Whitebar/releases/download/v0.1/Whitebar.ps1.lzma";
+	if (safe_strncmp(fido_url, "https://github.com/Smu1zel/Whitebar", 35) != 0) {
 		uprintf("WARNING: Download script URL %s is invalid ✗", fido_url);
 		safe_free(fido_url);
 		goto out;
@@ -1359,159 +1350,6 @@ INT_PTR CALLBACK update_subclass_callback(HWND hDlg, UINT message, WPARAM wParam
 		break;
 	}
 	return CallWindowProc(update_original_proc, hDlg, message, wParam, lParam);
-}
-
-/*
- * New version notification dialog
- */
-INT_PTR CALLBACK NewVersionCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	char cmdline[] = APPLICATION_NAME " -w 150";
-	static char* filepath = NULL;
-	static int download_status = 0;
-	static HFONT hyperlink_font = NULL;
-	static HANDLE hThread = NULL;
-	HWND hNotes;
-	LONG err;
-	DWORD exit_code;
-	STARTUPINFOA si;
-	PROCESS_INFORMATION pi;
-	EXT_DECL(dl_ext, NULL, __VA_GROUP__("*.exe"), __VA_GROUP__(lmprintf(MSG_037)));
-
-	switch (message) {
-	case WM_INITDIALOG:
-		apply_localization(IDD_NEW_VERSION, hDlg);
-		download_status = 0;
-		SetTitleBarIcon(hDlg);
-		CenterDialog(hDlg, NULL);
-		// Subclass the callback so that we can change the cursor
-		update_original_proc = (WNDPROC)SetWindowLongPtr(hDlg, GWLP_WNDPROC, (LONG_PTR)update_subclass_callback);
-		hNotes = GetDlgItem(hDlg, IDC_RELEASE_NOTES);
-		SendMessage(hNotes, EM_AUTOURLDETECT, 1, 0);
-		SendMessageA(hNotes, EM_SETTEXTEX, (WPARAM)&friggin_microsoft_unicode_amateurs, (LPARAM)update.release_notes);
-		SendMessage(hNotes, EM_SETSEL, -1, -1);
-		SendMessage(hNotes, EM_SETEVENTMASK, 0, ENM_LINK);
-		SetWindowTextU(GetDlgItem(hDlg, IDC_YOUR_VERSION), lmprintf(MSG_018,
-			rufus_version[0], rufus_version[1], rufus_version[2]));
-		SetWindowTextU(GetDlgItem(hDlg, IDC_LATEST_VERSION), lmprintf(MSG_019,
-			update.version[0], update.version[1], update.version[2]));
-		SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD_URL), update.download_url);
-		SendMessage(GetDlgItem(hDlg, IDC_PROGRESS), PBM_SETRANGE, 0, (MAX_PROGRESS<<16) & 0xFFFF0000);
-		if (update.download_url == NULL)
-			EnableWindow(GetDlgItem(hDlg, IDC_DOWNLOAD), FALSE);
-		ResizeButtonHeight(hDlg, IDCANCEL);
-		break;
-	case WM_CTLCOLORSTATIC:
-		if ((HWND)lParam != GetDlgItem(hDlg, IDC_WEBSITE))
-			return FALSE;
-		// Change the font for the hyperlink
-		SetBkMode((HDC)wParam, TRANSPARENT);
-		CreateStaticFont((HDC)wParam, &hyperlink_font, TRUE);
-		SelectObject((HDC)wParam, hyperlink_font);
-		SetTextColor((HDC)wParam, RGB(0,0,125));	// DARK_BLUE
-		return (INT_PTR)CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
-	case WM_COMMAND:
-		switch (LOWORD(wParam)) {
-		case IDCLOSE:
-		case IDCANCEL:
-			if (download_status != 1) {
-				reset_localization(IDD_NEW_VERSION);
-				safe_free(filepath);
-				EndDialog(hDlg, LOWORD(wParam));
-			}
-			return (INT_PTR)TRUE;
-		case IDC_WEBSITE:
-			ShellExecuteA(hDlg, "open", RUFUS_URL, NULL, NULL, SW_SHOWNORMAL);
-			break;
-		case IDC_DOWNLOAD:	// Also doubles as abort and launch function
-			switch(download_status) {
-			case 1:		// Abort
-				ErrorStatus = RUFUS_ERROR(ERROR_CANCELLED);
-				download_status = 0;
-				hThread = NULL;
-				break;
-			case 2:		// Launch newer version and close this one
-				if ((hThread == NULL) || (!GetExitCodeThread(hThread, &exit_code)) || (exit_code == 0)) {
-					hThread = NULL;
-					EnableWindow(GetDlgItem(hDlg, IDC_DOWNLOAD), FALSE);
-					break;
-				}
-
-				hThread = NULL;
-				EnableWindow(GetDlgItem(hDlg, IDC_DOWNLOAD), FALSE);
-				// Add a 1.5 sec delay, with coundown, on account of antivirus scanners
-				SetWindowTextA(GetDlgItem(hDlg, IDC_DOWNLOAD), "3");
-				Sleep(500);
-				SetWindowTextA(GetDlgItem(hDlg, IDC_DOWNLOAD), "2");
-				Sleep(500);
-				SetWindowTextA(GetDlgItem(hDlg, IDC_DOWNLOAD), "1");
-				Sleep(500);
-				SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD), lmprintf(MSG_142));
-
-				err = ValidateSignature(hDlg, filepath);
-				if ((err != NO_ERROR) && ((force_update < 2) || (err != TRUST_E_TIME_STAMP))) {
-					// Unconditionally delete the download
-					DeleteFileU(filepath);
-					break;
-				}
-
-				memset(&si, 0, sizeof(si));
-				memset(&pi, 0, sizeof(pi));
-				si.cb = sizeof(si);
-				if (!CreateProcessU(filepath, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-					PrintInfo(0, MSG_214);
-					uprintf("Failed to launch new application: %s", WindowsErrorString());
-				} else {
-					PrintInfo(0, MSG_213);
-					PostMessage(hDlg, WM_COMMAND, (WPARAM)IDCLOSE, 0);
-					PostMessage(hMainDialog, WM_CLOSE, 0, 0);
-				}
-				break;
-			default:	// Download
-				if (update.download_url == NULL) {
-					uprintf("Could not get download URL");
-					break;
-				}
-				dl_ext.filename = PathFindFileNameU(update.download_url);
-				filepath = FileDialog(TRUE, app_dir, &dl_ext, NULL);
-				if (filepath == NULL) {
-					uprintf("Could not get save path");
-					break;
-				}
-				// Opening the File Dialog will make us lose tabbing focus - set it back
-				SendMessage(hDlg, WM_NEXTDLGCTL, (WPARAM)GetDlgItem(hDlg, IDC_DOWNLOAD), TRUE);
-				hThread = DownloadSignedFileThreaded(update.download_url, filepath, hDlg, TRUE);
-				break;
-			}
-			return (INT_PTR)TRUE;
-		}
-		break;
-	case UM_PROGRESS_INIT:
-		EnableWindow(GetDlgItem(hDlg, IDCANCEL), FALSE);
-		SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD), lmprintf(MSG_038));
-		ErrorStatus = 0;
-		download_status = 1;
-		return (INT_PTR)TRUE;
-	case UM_PROGRESS_EXIT:
-		EnableWindow(GetDlgItem(hDlg, IDCANCEL), TRUE);
-		if (wParam != 0) {
-			SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD), lmprintf(MSG_039));
-			download_status = 2;
-		} else {
-			SetWindowTextU(GetDlgItem(hDlg, IDC_DOWNLOAD), lmprintf(MSG_040));
-			// Disable the download button if we found an invalid signature
-			EnableWindow(GetDlgItem(hDlg, IDC_DOWNLOAD),
-				ErrorStatus != RUFUS_ERROR(APPERR(ERROR_BAD_SIGNATURE)));
-			download_status = 0;
-		}
-		return (INT_PTR)TRUE;
-	}
-	return (INT_PTR)FALSE;
-}
-
-void DownloadNewVersion(void)
-{
-	MyDialogBox(hMainInstance, IDD_NEW_VERSION, hMainDialog, NewVersionCallback);
 }
 
 void SetTitleBarIcon(HWND hDlg)

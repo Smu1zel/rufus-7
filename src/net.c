@@ -463,7 +463,7 @@ static DWORD WINAPI DownloadISOThread(LPVOID param)
 {
 	char locale_str[1024], cmdline[sizeof(locale_str) + 512], pipe[MAX_GUID_STRING_LENGTH + 16] = "\\\\.\\pipe\\";
 	char powershell_path[MAX_PATH], icon_path[MAX_PATH] = { 0 }, script_path[MAX_PATH] = { 0 };
-	char *url = NULL, sig_url[128];
+	char *url = NULL;
 	uint64_t uncompressed_size;
 	int64_t size = -1;
 	BYTE *compressed = NULL, *sig = NULL;
@@ -488,7 +488,6 @@ static DWORD WINAPI DownloadISOThread(LPVOID param)
 #if !defined(FORCE_URL)
 #if defined(RUFUS_TEST)
 	IGNORE_RETVAL(hFile);
-	IGNORE_RETVAL(sig_url);
 	IGNORE_RETVAL(dwCompressedSize);
 	IGNORE_RETVAL(uncompressed_size);
 	// In test mode, just use our local script
@@ -499,19 +498,6 @@ static DWORD WINAPI DownloadISOThread(LPVOID param)
 		dwCompressedSize = (DWORD)DownloadToFileOrBuffer(fido_url, NULL, &compressed, hMainDialog, FALSE);
 		if (dwCompressedSize == 0)
 			goto out;
-		static_sprintf(sig_url, "%s.sig", fido_url);
-		dwSize = (DWORD)DownloadToFileOrBuffer(sig_url, NULL, &sig, NULL, FALSE);
-		if ((dwSize != RSA_SIGNATURE_SIZE) || (!ValidateOpensslSignature(compressed, dwCompressedSize, sig, dwSize))) {
-			uprintf("FATAL: Download signature is invalid ✗");
-			ErrorStatus = RUFUS_ERROR(APPERR(ERROR_BAD_SIGNATURE));
-			SendMessage(hProgress, PBM_SETSTATE, (WPARAM)PBST_ERROR, 0);
-			SetTaskbarProgressState(TASKBAR_ERROR);
-			safe_free(compressed);
-			free(sig);
-			goto out;
-		}
-		free(sig);
-		uprintf("Download signature is valid ✓");
 		uncompressed_size = *((uint64_t*)&compressed[5]);
 		if ((uncompressed_size < 1 * MB) && (bled_init(0, uprintf, NULL, NULL, NULL, NULL, &ErrorStatus) >= 0)) {
 			fido_script = malloc((size_t)uncompressed_size);
@@ -569,19 +555,6 @@ static DWORD WINAPI DownloadISOThread(LPVOID param)
 	static_sprintf(cmdline, "\"%s\" -NonInteractive -Sta -NoProfile –ExecutionPolicy Bypass "
 		"-File \"%s\" -PipeName %s -LocData \"%s\" -Icon \"%s\" -AppTitle \"%s\"",
 		powershell_path, script_path, &pipe[9], locale_str, icon_path, lmprintf(MSG_149));
-
-#ifndef RUFUS_TEST
-	// For extra security, even after we validated that the LZMA download is properly
-	// signed, we also validate the Authenticode signature of the local script.
-	if (ValidateSignature(INVALID_HANDLE_VALUE, script_path) != NO_ERROR) {
-		uprintf("FATAL: Script signature is invalid ✗");
-		ErrorStatus = RUFUS_ERROR(APPERR(ERROR_BAD_SIGNATURE));
-		SendMessage(hProgress, PBM_SETSTATE, (WPARAM)PBST_ERROR, 0);
-		SetTaskbarProgressState(TASKBAR_ERROR);
-		goto out;
-	}
-	uprintf("Script signature is valid ✓");
-#endif
 
 	ErrorStatus = 0;
 	dwExitCode = RunCommand(cmdline, app_data_dir, TRUE);
