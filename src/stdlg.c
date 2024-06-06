@@ -52,7 +52,6 @@ static char* szMessageText = NULL;
 static char* szMessageTitle = NULL;
 static char **szDialogItem;
 static int nDialogItems;
-static HWND hUpdatesDlg;
 static const SETTEXTEX friggin_microsoft_unicode_amateurs = { ST_DEFAULT, CP_UTF8 };
 static BOOL notification_is_question;
 static const notification_info* notification_more_info;
@@ -61,19 +60,6 @@ static WNDPROC update_original_proc = NULL;
 static HWINEVENTHOOK ap_weh = NULL;
 static char title_str[2][128], button_str[128];
 HWND hFidoDlg = NULL;
-
-static int update_settings_reposition_ids[] = {
-	IDI_ICON,
-	IDC_POLICY,
-	IDS_UPDATE_SETTINGS_GRP,
-	IDS_UPDATE_FREQUENCY_TXT,
-	IDC_UPDATE_FREQUENCY,
-	IDS_INCLUDE_BETAS_TXT,
-	IDC_INCLUDE_BETAS,
-	IDS_CHECK_NOW_GRP,
-	IDC_CHECK_NOW,
-	IDCANCEL,
-};
 
 /*
  * https://blogs.msdn.microsoft.com/oldnewthing/20040802-00/?p=38283/
@@ -1174,86 +1160,6 @@ BOOL SetTaskbarProgressValue(ULONGLONG ullCompleted, ULONGLONG ullTotal)
 	return !FAILED(ITaskbarList3_SetProgressValue(ptbl, hMainDialog, ullCompleted, ullTotal));
 }
 
-static void Reposition(HWND hDlg, int id, int prev_id, int dx, int dw)
-{
-	HWND hCtrl, hPrevCtrl;
-	RECT rc;
-
-	hCtrl = GetDlgItem(hDlg, id);
-	hPrevCtrl = (prev_id > 0) ? GetDlgItem(hDlg, prev_id) : HWND_TOP;
-	GetWindowRect(hCtrl, &rc);
-	MapWindowPoints(NULL, hDlg, (POINT*)&rc, 2);
-	SetWindowPos(hCtrl, hPrevCtrl, rc.left + dx, rc.top, rc.right - rc.left + dw, rc.bottom - rc.top, 0);
-}
-
-static void PositionControls(HWND hDlg)
-{
-	RECT rc;
-	HWND hCtrl, hPrevCtrl;
-	int i, ow, dw;	// original width, delta
-
-	// Get the original size of the control
-	GetWindowRect(GetDlgItem(hDlg, IDS_UPDATE_FREQUENCY_TXT), &rc);
-	MapWindowPoints(NULL, hDlg, (POINT*)&rc, 2);
-	ow = rc.right - rc.left;
-	dw = GetTextWidth(hDlg, IDS_UPDATE_FREQUENCY_TXT) - ow;
-	dw = max(dw, GetTextWidth(hDlg, IDS_INCLUDE_BETAS_TXT) - ow);
-	if (dw > 0) {
-		GetWindowRect(hDlg, &rc);
-		SetWindowPos(hDlg, NULL, -1, -1, rc.right - rc.left + dw, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
-		for (i = 1; i < ARRAYSIZE(update_settings_reposition_ids); i++)
-			Reposition(hDlg, update_settings_reposition_ids[i], update_settings_reposition_ids[i-1],
-				((i < 5) && (i != 4)) ? 0 : dw, ((i >= 5) || (i == 4)) ? 0 : dw);
-	}
-
-	hCtrl = GetDlgItem(hDlg, IDC_UPDATE_FREQUENCY);
-	GetWindowRect(hCtrl, &rc);
-	MapWindowPoints(NULL, hDlg, (POINT*)&rc, 2);
-	ow = rc.right - rc.left;
-
-	dw = GetTextSize(hCtrl, lmprintf(MSG_013)).cx;
-	dw = max(dw, GetTextSize(hCtrl, lmprintf(MSG_030, lmprintf(MSG_014))).cx);
-	dw = max(dw, GetTextSize(hCtrl, lmprintf(MSG_015)).cx);
-	dw = max(dw, GetTextSize(hCtrl, lmprintf(MSG_016)).cx);
-	dw = max(dw, GetTextSize(hCtrl, lmprintf(MSG_008)).cx);
-	dw = max(dw, GetTextSize(hCtrl, lmprintf(MSG_009)).cx);
-	dw -= ow - ddw;
-	if (dw > 0) {
-		GetWindowRect(hDlg, &rc);
-		SetWindowPos(hDlg, NULL, -1, -1, rc.right - rc.left + dw, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
-		for (i = 1; i < ARRAYSIZE(update_settings_reposition_ids); i++) {
-			if ((i == 3) || (i == 5))
-				continue;
-			Reposition(hDlg, update_settings_reposition_ids[i], update_settings_reposition_ids[i-1],
-				(i < 7) ? 0 : dw, (i >= 7) ? 0 : dw);
-		}
-	}
-
-	GetWindowRect(GetDlgItem(hDlg, IDC_CHECK_NOW), &rc);
-	MapWindowPoints(NULL, hDlg, (POINT*)&rc, 2);
-	ow = rc.right - rc.left;
-	dw = GetTextWidth(hDlg, IDC_CHECK_NOW) - ow + cbw;
-	dw = max(dw, GetTextWidth(hDlg, IDCANCEL) - ow + cbw);
-	if (dw > 0) {
-		GetWindowRect(hDlg, &rc);
-		SetWindowPos(hDlg, NULL, -1, -1, rc.right - rc.left + dw, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
-		for (i = 1; i < ARRAYSIZE(update_settings_reposition_ids); i++) {
-			if ((i >= 2) && (i <= 6))
-				continue;
-			Reposition(hDlg, update_settings_reposition_ids[i], update_settings_reposition_ids[i-1], 0, dw);
-		}
-	}
-	hCtrl = GetDlgItem(hDlg, IDC_CHECK_NOW);
-	GetWindowRect(hCtrl, &rc);
-	MapWindowPoints(NULL, hDlg, (POINT*)&rc, 2);
-	hPrevCtrl = GetNextWindow(hCtrl, GW_HWNDPREV);
-	SetWindowPos(hCtrl, hPrevCtrl, rc.left, rc.top, rc.right - rc.left, ddbh, 0);
-	hCtrl = GetDlgItem(hDlg, IDCANCEL);
-	GetWindowRect(hCtrl, &rc);
-	MapWindowPoints(NULL, hDlg, (POINT*)&rc, 2);
-	hPrevCtrl = GetNextWindow(hCtrl, GW_HWNDPREV);
-	SetWindowPos(hCtrl, hPrevCtrl, rc.left, rc.top, rc.right - rc.left, ddbh, 0);
-}
 /*
  * Use a thread to enable the download button as this may be a lengthy
  * operation due to the external download check.
