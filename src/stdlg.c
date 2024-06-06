@@ -1177,9 +1177,7 @@ static DWORD WINAPI CheckForFidoThread(LPVOID param)
 	if (is_active)
 		return -1;
 	is_active = TRUE;
-	safe_free(fido_url);
-	// TODO: I should probably specify this somewhere rather than hardcode it here every update.
-	fido_url = "https://github.com/Smu1zel/Whitebar/releases/download/v0.1/Whitebar.ps1.lzma";
+	fido_url = WHITEBAR_URL;
 	if (safe_strncmp(fido_url, "https://github.com/Smu1zel/Whitebar", 35) != 0) {
 		uprintf("WARNING: Download script URL %s is invalid ✗", fido_url);
 		safe_free(fido_url);

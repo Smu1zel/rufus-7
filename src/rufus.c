@@ -3624,7 +3624,6 @@ relaunch:
 	image_options = IMOP_WINTOGO;
 	image_option_txt[0] = 0;
 	select_index = 0;
-	safe_free(fido_url);
 	SetProcessDefaultLayout(right_to_left_mode ? LAYOUT_RTL : 0);
 	if (get_loc_data_file(loc_file, selected_locale))
 		WriteSettingStr(SETTING_LOCALE, selected_locale->txt[0]);
