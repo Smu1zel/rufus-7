@@ -31,6 +31,7 @@
 #include "resource.h"
 #include "registry.h"
 #include "msapi_utf8.h"
+#include "timezoneapi.h"
 #include "localization.h"
 
  /* Memory leaks detection - define _CRTDBG_MAP_ALLOC as preprocessor macro */
@@ -60,10 +61,13 @@ extern StrArray modified_files;
 /// <returns>The path of a newly created answer file on success or NULL on error.</returns>
 char* CreateUnattendXml(int arch, int flags)
 {
+	const static char* xml_arch_names[5] = { "x86", "amd64", "arm", "arm64" };
+	const static char* unallowed_account_names[] = { "Administrator", "Guest", "KRBTGT", "Local" };
 	static char path[MAX_PATH];
+	char* tzstr;
 	FILE* fd;
+	TIME_ZONE_INFORMATION tz_info;
 	int i, order;
-	const char* xml_arch_names[5] = { "x86", "amd64", "arm", "arm64" };
 	unattend_xml_flags = flags;
 	if (arch < ARCH_X86_32 || arch > ARCH_ARM_64 || flags == 0) {
 		uprintf("Note: No Windows User Experience options selected");
@@ -149,11 +153,20 @@ char* CreateUnattendXml(int arch, int flags)
 				fprintf(fd, "        <ProtectYourPC>3</ProtectYourPC>\n");
 				fprintf(fd, "      </OOBE>\n");
 			}
-			if (flags & UNATTEND_SET_USER) {
-				if ((unattend_username[0] == 0) || (stricmp(unattend_username, "Administrator") == 0) ||
-					(stricmp(unattend_username, "Guest") == 0)) {
-					uprintf("WARNING: '%s' is not allowed as local account name - Option ignored", unattend_username);
+			if (flags & UNATTEND_DUPLICATE_LOCALE) {
+				if ((GetTimeZoneInformation(&tz_info) == TIME_ZONE_ID_INVALID) ||
+					((tzstr = wchar_to_utf8(tz_info.StandardName)) == NULL)) {
+					uprintf("WARNING: Could not retrieve current timezone: %s", WindowsErrorString());
 				} else {
+					fprintf(fd, "      <TimeZone>%s</TimeZone>\n", tzstr);
+					free(tzstr);
+				}
+			}
+			if (flags & UNATTEND_SET_USER) {
+				for (i = 0; (i < ARRAYSIZE(unallowed_account_names)) && (stricmp(unattend_username, unallowed_account_names[i]) != 0); i++);
+				if (i < ARRAYSIZE(unallowed_account_names)) {
+					uprintf("WARNING: '%s' is not allowed as local account name - Option ignored", unattend_username);
+				} else if (unattend_username[0] != 0) {
 					uprintf("• Use '%s' for local account name", unattend_username);
 					// If we create a local account in unattend.xml, then we can get Windows 11
 					// 22H2 to skip MSA even if the network is connected during installation.
@@ -631,7 +644,7 @@ out:
 
 /// <summary>
 /// Setup a Windows To Go drive according to the official Microsoft instructions detailed at:
-/// https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-8.1-and-8/jj721578(v=ws.11).
+/// https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/deployment/windows-to-go/deploy-windows-to-go
 /// Note that as opposed to the technet guide above we use bcdedit rather than 'unattend.xml'
 /// to disable the recovery environment.
 /// </summary>
@@ -892,7 +905,8 @@ BOOL ApplyWindowsCustomization(char drive_letter, int flags)
 			// If we have a windowsPE section, copy the answer files to the root of boot.wim as
 			// Autounattend.xml. This also results in that file being automatically copied over
 			// to %WINDIR%\Panther\unattend.xml for later passes processing.
-			assert(mount_path != NULL);
+			if_not_assert(mount_path != NULL)
+				goto out;
 			static_sprintf(path, "%s\\Autounattend.xml", mount_path);
 			if (!CopyFileU(unattend_xml_path, path, TRUE)) {
 				uprintf("Could not create boot.wim 'Autounattend.xml': %s", WindowsErrorString());
