@@ -348,7 +348,8 @@ typedef struct _DRIVE_LAYOUT_INFORMATION_EX4 {
 } DRIVE_LAYOUT_INFORMATION_EX4, *PDRIVE_LAYOUT_INFORMATION_EX4;
 
 static __inline BOOL UnlockDrive(HANDLE hDrive) {
-	return DeviceIoControl(hDrive, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, NULL, NULL);
+	DWORD size;
+	return DeviceIoControl(hDrive, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, &size, NULL);
 }
 #define safe_unlockclose(h) do {if ((h != INVALID_HANDLE_VALUE) && (h != NULL)) {UnlockDrive(h); CloseHandle(h); h = INVALID_HANDLE_VALUE;}} while(0)
 

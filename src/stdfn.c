@@ -745,12 +745,12 @@ out:
  * size is allocated for the resource. Else the buffer is allocated for
  * the resource size.
  */
-uint8_t* GetResource(HMODULE module, char* name, char* type, const char* desc, DWORD* len, BOOL duplicate)
+unsigned char* GetResource(HMODULE module, char* name, char* type, const char* desc, DWORD* len, BOOL duplicate)
 {
 	HGLOBAL res_handle;
 	HRSRC res;
 	DWORD res_len;
-	uint8_t* p = NULL;
+	unsigned char* p = NULL;
 
 	res = FindResourceA(module, name, type);
 	if (res == NULL) {
@@ -767,7 +767,7 @@ uint8_t* GetResource(HMODULE module, char* name, char* type, const char* desc, D
 	if (duplicate) {
 		if (*len == 0)
 			*len = res_len;
-		p = calloc(*len, 1);
+		p = (unsigned char*)calloc(*len, 1);
 		if (p == NULL) {
 			uprintf("Could not allocate resource '%s'", desc);
 			goto out;
@@ -776,7 +776,7 @@ uint8_t* GetResource(HMODULE module, char* name, char* type, const char* desc, D
 		if (res_len > *len)
 			uprintf("WARNING: Resource '%s' was truncated by %d bytes!", desc, res_len - *len);
 	} else {
-		p = LockResource(res_handle);
+		p = (unsigned char*)LockResource(res_handle);
 	}
 	*len = res_len;
 
