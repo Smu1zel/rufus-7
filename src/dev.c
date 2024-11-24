@@ -879,8 +879,8 @@ BOOL GetDevices(DWORD devnum)
 				continue;
 			}
 
-			hDrive = CreateFileA(devint_detail_data->DevicePath, GENERIC_READ|GENERIC_WRITE,
-				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			hDrive = CreateFileWithTimeout(devint_detail_data->DevicePath, GENERIC_READ|GENERIC_WRITE,
+				FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL, 3000);
 			if(hDrive == INVALID_HANDLE_VALUE) {
 				uprintf("Could not open '%s': %s", devint_detail_data->DevicePath, WindowsErrorString());
 				continue;
@@ -943,6 +943,9 @@ BOOL GetDevices(DWORD devnum)
 					break;
 				} else if (props.is_VHD && IsMsDevDrive(drive_index)) {
 					uprintf("Device eliminated because it was detected as a Microsoft Dev Drive");
+					safe_free(devint_detail_data);
+					break;
+				} else if (IsFilteredDrive(drive_index)) {
 					safe_free(devint_detail_data);
 					break;
 				}

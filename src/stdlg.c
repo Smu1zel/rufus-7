@@ -46,7 +46,7 @@
 
 /* Globals */
 extern BOOL is_x86_64, appstore_version;
-extern char unattend_username[MAX_USERNAME_LENGTH];
+extern char unattend_username[MAX_USERNAME_LENGTH], *sbat_level_txt;
 static HICON hMessageIcon = (HICON)INVALID_HANDLE_VALUE;
 static char* szMessageText = NULL;
 static char* szMessageTitle = NULL;
@@ -1170,6 +1170,8 @@ static DWORD WINAPI CheckForFidoThread(LPVOID param)
 	static BOOL is_active = FALSE;
 	LONG_PTR style;
 	char* loc = NULL;
+	uint32_t i;
+	uint64_t len;
 	HWND hCtrl;
 
 	// Because a user may switch language before this thread has completed,
@@ -1184,6 +1186,20 @@ static DWORD WINAPI CheckForFidoThread(LPVOID param)
 		safe_free(fido_url);
 		goto out;
 	}
+	safe_free(sbat_entries);
+	safe_free(sbat_level_txt);
+
+	// Get the latest sbat_level.txt data while we're poking the network for Fido.
+	len = DownloadToFileOrBuffer(RUFUS_URL "/sbat_level.txt", NULL, (BYTE**)&sbat_level_txt, NULL, FALSE);
+	if (len != 0 && len < 512) {
+		sbat_entries = GetSbatEntries(sbat_level_txt);
+		if (sbat_entries != 0) {
+			for (i = 0; sbat_entries[i].product != NULL; i++);
+			if (i > 0)
+				uprintf("Found %d additional UEFI revocation filters from remote SBAT", i);
+		}
+	}
+
 	if (IsDownloadable(fido_url)) {
 		hCtrl = GetDlgItem(hMainDialog, IDC_SELECT);
 		style = GetWindowLongPtr(hCtrl, GWL_STYLE);
