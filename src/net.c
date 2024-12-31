@@ -60,6 +60,7 @@ HANDLE update_check_thread = NULL;
 extern loc_cmd* selected_locale;
 extern HANDLE dialog_handle;
 extern BOOL is_x86_64;
+extern USHORT NativeMachine;
 static DWORD error_code, fido_len = 0;
 static const char* request_headers = "Accept-Encoding: gzip, deflate";
 
@@ -532,8 +533,8 @@ static DWORD WINAPI DownloadISOThread(LPVOID param)
 	}
 
 	static_sprintf(cmdline, "\"%s\" -NonInteractive -Sta -NoProfile –ExecutionPolicy Bypass "
-		"-File \"%s\" -PipeName %s -LocData \"%s\" -Icon \"%s\" -AppTitle \"%s\"",
-		powershell_path, script_path, &pipe[9], locale_str, icon_path, lmprintf(MSG_149));
+		"-File \"%s\" -PipeName %s -LocData \"%s\" -Icon \"%s\" -AppTitle \"%s\" -PlatformArch \"%s\"",
+		powershell_path, script_path, &pipe[9], locale_str, icon_path, lmprintf(MSG_149), GetArchName(NativeMachine));
 
 	ErrorStatus = 0;
 	dwExitCode = RunCommand(cmdline, app_data_dir, TRUE);
