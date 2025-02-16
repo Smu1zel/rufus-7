@@ -1,3 +1,12 @@
+---
+name: Report an issue with the application
+about: Please make sure you follow the check-list carefully!
+title: ''
+labels: ''
+assignees: ''
+
+---
+
 ﻿Checklist
 ---------
 - [ ] I performed a search in the issue tracker for similar issues using keywords relevant to my problem, such as the error message I got from the log.
